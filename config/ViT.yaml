@@ -1,0 +1,38 @@
+base: &base
+
+  # Model config
+  embed_dim: 384
+  depth: 12
+  dropout: 0
+  patch_size: 16
+
+  # Training config
+  img_size: [720, 1440]
+  dt: 1 
+  global_batch_size: 256 # number of samples per training batch
+  num_epochs: 60
+  amp_mode: none
+  enable_apex: False
+  enable_jit: False
+  expdir: '/logs'
+  lr_schedule: 'cosine'
+  lr: 5E-4
+
+  # Data
+  num_data_workers: 2 # number of dataloader worker threads per proc
+  n_in_channels: 20
+  n_out_channels: 20
+  train_data_path:   '/data/train'
+  valid_data_path:   '/data/valid'
+  inf_data_path:     '/data/test'
+  time_means_path:   '/data/stats/time_means.npy'
+  global_means_path: '/data/stats/global_means.npy'
+  global_stds_path:  '/data/stats/global_stds.npy'
+
+# A short config for testing/profiling on a single A100
+short: &short
+  <<: *base
+  num_epochs: 15
+  num_data_workers: 4
+  global_batch_size: 64
+
