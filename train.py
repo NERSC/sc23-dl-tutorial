@@ -16,7 +16,7 @@ import logging
 from utils import logging_utils
 logging_utils.config_logger()
 from utils.YParams import YParams
-from utils.data_loader import get_data_loader
+from utils import get_data_loader_distributed
 from utils.loss import l2_loss, l2_loss_opt
 from utils.metrics import weighted_rmse
 from networks import vit
@@ -42,8 +42,8 @@ def train(params, args, local_rank, world_rank, world_size):
 
     # get data loader
     logging.info('rank %d, begin data loader init'%world_rank)
-    train_data_loader, train_dataset, train_sampler = get_data_loader(params, params.train_data_path, params.distributed, train=True)
-    val_data_loader, valid_dataset = get_data_loader(params, params.valid_data_path, params.distributed, train=False)
+    train_data_loader, train_dataset, train_sampler = get_data_loader_distributed(params, params.train_data_path, params.distributed, train=True)
+    val_data_loader, valid_dataset = get_data_loader_distributed(params, params.valid_data_path, params.distributed, train=False)
     logging.info('rank %d, data loader initialized'%(world_rank))
 
     # create model
@@ -110,7 +110,7 @@ def train(params, args, local_rank, world_rank, world_size):
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
-        if params.distributed:
+        if params.distributed and (train_sampler is not None):
             train_sampler.set_epoch(epoch)
         start = time.time()
         tr_loss = []
@@ -121,8 +121,6 @@ def train(params, args, local_rank, world_rank, world_size):
         model.train()
         step_count = 0
         for i, data in enumerate(train_data_loader, 0):
-            if i>10:
-                break
             if (args.enable_manual_profiling and world_rank==0):
                 if (epoch == 3 and i == 0):
                     torch.cuda.profiler.start()
@@ -195,8 +193,6 @@ def train(params, args, local_rank, world_rank, world_size):
 
         with torch.no_grad():
             for i, data in enumerate(val_data_loader, 0):
-                if i>10:
-                    break
                 with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
                     inp, tar = map(lambda x: x.to(device), data)
                     gen = model(inp)

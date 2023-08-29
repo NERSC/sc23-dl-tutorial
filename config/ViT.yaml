@@ -19,6 +19,7 @@ base: &base
   lr: 5E-4
 
   # Data
+  data_loader_config: 'pytorch'
   num_data_workers: 2 # number of dataloader worker threads per proc
   n_in_channels: 20
   n_out_channels: 20
@@ -33,6 +34,12 @@ base: &base
 short: &short
   <<: *base
   num_epochs: 15
-  num_data_workers: 4
-  global_batch_size: 64
+  num_data_workers: 2
+  global_batch_size: 32
+
+# Short config with full optimizations
+short_opt:
+  <<: *short
+  data_loader_config: 'dali'
+  num_data_workers: 2
 

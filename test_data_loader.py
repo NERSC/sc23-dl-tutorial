@@ -1,14 +1,15 @@
 import torch
-from utils.data_loader import get_data_loader
+from utils import get_data_loader_distributed
 import numpy as np
 from utils.YParams import YParams
 from networks.vit import ViT
 import matplotlib.pyplot as plt
 
-params = YParams('./config/ViT.yaml', 'base')
+params = YParams('./config/ViT.yaml', 'short')
+params.global_batch_size = 1
 params.local_batch_size = 1
 
-valid_dataloader, dataset_valid  = get_data_loader(params, params.valid_data_path, distributed=False, train=False)
+valid_dataloader, dataset_valid  = get_data_loader_distributed(params, params.valid_data_path, distributed=False, train=False)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 params.device = device

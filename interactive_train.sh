@@ -11,7 +11,7 @@ mkdir -p ${LOGDIR}
 ngpu=4
 config_file=./config/ViT.yaml
 config="short"
-run_num="interactive_b64_dataworkers4"
+run_num="interactive_b32"
 amp_mode="fp16"
 cmd="python train.py --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
 
