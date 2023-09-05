@@ -1,17 +1,20 @@
 #!/bin/bash 
 #SBATCH -C gpu 
+#SBATCH --nodes=1
+#SBATCH -q regular
 #SBATCH -A nstaff
 #SBATCH --ntasks-per-node 4
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-node 4
 #SBATCH --time=06:00:00
-#SBATCH --image=nersc/pytorch:ngc-23.04-v0
-#SBATCH --module=gpu,nccl-2.15
+#SBATCH --image=nersc/pytorch:ngc-23.07-v0
+#SBATCH --module=gpu,nccl-2.18
 #SBATCH -J vit-era5
 #SBATCH -o %x-%j.out
 
-DATADIR=/pscratch/sd/s/shas1693/data/sc23_tutorial_data/
+DATADIR=/pscratch/sd/s/shas1693/data/sc23_tutorial_data/downsampled
 LOGDIR=${SCRATCH}/sc23-dl-tutorial/logs
+env=~/.local/perlmutter/nersc_pytorch_ngc-23.07-v0
 mkdir -p ${LOGDIR}
 args="${@}"
 
@@ -33,9 +36,8 @@ export MASTER_ADDR=$(hostname)
 export CUDA_VISIBLE_DEVICES=3,2,1,0
 
 set -x
-srun -u shifter -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
+srun -u shifter --env PYTHONUSERBASE=${env} -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
     bash -c "
-    source nccl-2.17.sh
     source export_DDP_vars.sh
     ${PROFILE_CMD} python train.py ${args}
     "

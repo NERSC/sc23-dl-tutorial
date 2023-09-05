@@ -4,10 +4,10 @@ base: &base
   embed_dim: 384
   depth: 12
   dropout: 0
-  patch_size: 16
+  patch_size: 8
 
   # Training config
-  img_size: [720, 1440]
+  img_size: [360, 720]
   dt: 1 
   global_batch_size: 256 # number of samples per training batch
   num_epochs: 60
@@ -30,16 +30,21 @@ base: &base
   global_means_path: '/data/stats/global_means.npy'
   global_stds_path:  '/data/stats/global_stds.npy'
 
-# A short config for testing/profiling on a single A100
+short_noopt:
+  <<: *base
+  num_epochs: 10
+  num_data_workers: 0
+  global_batch_size: 128
+
 short: &short
   <<: *base
-  num_epochs: 15
-  num_data_workers: 2
-  global_batch_size: 32
+  num_epochs: 10
+  num_data_workers: 8
+  global_batch_size: 128
 
 # Short config with full optimizations
 short_opt:
   <<: *short
   data_loader_config: 'dali'
-  num_data_workers: 2
+  num_data_workers: 8
 
