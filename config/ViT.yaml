@@ -30,17 +30,21 @@ base: &base
   global_means_path: '/data/stats/global_means.npy'
   global_stds_path:  '/data/stats/global_stds.npy'
 
+  # Comms
+  wireup_info: env
+  wireup_store: tcp
+
 short_noopt:
   <<: *base
   num_epochs: 10
   num_data_workers: 0
-  global_batch_size: 128
+  global_batch_size: 64
 
 short: &short
   <<: *base
   num_epochs: 10
   num_data_workers: 8
-  global_batch_size: 128
+  global_batch_size: 64
 
 # Short config with full optimizations
 short_opt:
@@ -48,3 +52,7 @@ short_opt:
   data_loader_config: 'dali'
   num_data_workers: 8
 
+short_mp:
+  <<: *short
+  num_data_workers: 8
+  global_batch_size: 64
