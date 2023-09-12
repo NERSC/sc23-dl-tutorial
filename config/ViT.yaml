@@ -9,18 +9,19 @@ base: &base
   # Training config
   img_size: [360, 720]
   dt: 1 
-  global_batch_size: 256 # number of samples per training batch
-  num_epochs: 60
+  global_batch_size: 16 # number of samples per training batch
+  num_epochs: 25
   amp_mode: none
   enable_apex: False
   enable_jit: False
   expdir: '/logs'
   lr_schedule: 'cosine'
   lr: 5E-4
+  warmup: 0
 
   # Data
   data_loader_config: 'pytorch'
-  num_data_workers: 2 # number of dataloader worker threads per proc
+  num_data_workers: 0 # number of dataloader worker threads per proc
   n_in_channels: 20
   n_out_channels: 20
   train_data_path:   '/data/train'
@@ -34,13 +35,13 @@ short_noopt:
   <<: *base
   num_epochs: 10
   num_data_workers: 0
-  global_batch_size: 128
+  global_batch_size: 16
 
 short: &short
   <<: *base
   num_epochs: 10
   num_data_workers: 8
-  global_batch_size: 128
+  global_batch_size: 16
 
 # Short config with full optimizations
 short_opt:

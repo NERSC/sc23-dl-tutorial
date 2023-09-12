@@ -19,6 +19,7 @@ from utils.YParams import YParams
 from utils import get_data_loader_distributed
 from utils.loss import l2_loss, l2_loss_opt
 from utils.metrics import weighted_rmse
+from utils.plots import generate_images
 from networks import vit
 
 import apex.optimizers as aoptim
@@ -62,7 +63,7 @@ def train(params, args, local_rank, world_rank, world_size):
                                             bucket_cap_mb=args.bucket_cap_mb)
 
     if params.enable_apex:
-        optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
+        optimizer = optim.FusedAdam(model.parameters(), lr = params.lr,
                                     adam_w_mode=False, set_grad_none=True)
     else:
         optimizer = optim.Adam(model.parameters(), lr = params.lr)
@@ -71,7 +72,11 @@ def train(params, args, local_rank, world_rank, world_size):
     startEpoch = 0
 
     if params.lr_schedule == 'cosine':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_epochs, last_epoch=startEpoch-1)
+        if params.warmup > 0:
+            lr_scale = lambda x: min(params.lr*((x+1)/params.warmup), 0.5*params.lr*(1 + np.cos(np.pi*x/params.num_epochs)))
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_scale)
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_epochs, last_epoch=startEpoch-1)
     else:
         scheduler = None
 
@@ -184,6 +189,8 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
             args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
             args.tboard_writer.add_scalar('Avg iters per sec', step_count/(end-start), iters)
+            fig = generate_images([inp, tar, gen])
+            args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
 
         val_start = time.time()
         val_loss = []
