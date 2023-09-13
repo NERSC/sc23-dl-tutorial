@@ -67,6 +67,9 @@ def train(params, args, local_rank, world_rank, world_size):
     else:
         optimizer = optim.Adam(model.parameters(), lr = params.lr)
 
+    if world_rank == 0:
+        print(model)
+
     iters = 0
     startEpoch = 0
 

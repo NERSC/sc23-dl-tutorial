@@ -21,7 +21,7 @@ config_file=./config/ViT.yaml
 config="short_opt" #"short_opt"
 run_num="test"
 amp_mode="fp16"
-col_parallel_size=1
+col_parallel_size=2
 row_parallel_size=2
 args="--col_parallel_size=$col_parallel_size --row_parallel_size=$row_parallel_size --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
 

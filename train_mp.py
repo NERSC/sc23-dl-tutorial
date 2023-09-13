@@ -66,6 +66,9 @@ def train(params, args, local_rank, world_rank, world_size):
                                             bucket_cap_mb=args.bucket_cap_mb)
 
 
+    if world_rank == 0:
+        print(model)
+            
     if params.enable_apex:
         optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
                                     adam_w_mode=False, set_grad_none=True)
