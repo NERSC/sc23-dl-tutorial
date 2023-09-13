@@ -52,6 +52,12 @@ short_opt:
   data_loader_config: 'dali'
   num_data_workers: 8
 
+long_opt:
+  <<: *short
+  embed_dim: 1024
+  data_loader_config: 'dali'
+  num_data_workers: 8
+
 short_mp:
   <<: *short
   num_data_workers: 8

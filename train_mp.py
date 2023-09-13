@@ -244,7 +244,8 @@ if __name__ == '__main__':
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
 
     # model parallelism arguments
-    parser.add_argument("--mlph_parallel_size", default=1, type=int, help="MLP hidden dimension parallelization")
+    parser.add_argument("--row_parallel_size", default=1, type=int, help="Number of row comms")
+    parser.add_argument("--col_parallel_size", default=1, type=int, help="Number of col comms")
 
     args = parser.parse_args()
  
@@ -277,9 +278,10 @@ if __name__ == '__main__':
 
     # setup model parallel sizes
     params["model_parallel_sizes"] = [
-        args.mlph_parallel_size
+        args.row_parallel_size,
+        args.col_parallel_size
     ]
-    params["model_parallel_names"] = ["mlph_matmul"]
+    params["model_parallel_names"] = ["row_matmul", "col_matmul"]
 
     # initialize comm
     comm.init(params, verbose=True)

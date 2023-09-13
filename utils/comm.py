@@ -11,6 +11,7 @@ from typing import Union
 # dummy placeholders
 _COMM_LIST = []
 _COMM_NAMES = {}
+_COMM_NAMES_META = []
 
 # world comm
 def get_size(comm_id: Union[str, int]) -> int:
@@ -82,9 +83,12 @@ def get_local_rank():
         return get_world_rank() % num_gpu
 
 
-def get_names():
+def get_names(meta=True):
     """Returns the names of all available communicators."""
-    return _COMM_NAMES
+    if return_meta:
+        return _COMM_NAMES
+    else:
+        return [c,v for c,v in _COMM_NAMES.items() if c not in _COMM_NAMES_META]
 
 
 def is_distributed(name: str):
@@ -257,6 +261,7 @@ def init_model_parallel_info(names, sizes, verbose=False):
                     if world_rank in grp:
                         _COMM_LIST.append(tmp_group)
                         _COMM_NAMES[merge_name] = comm_count
+                        _COMM_NAMES_META.append(merge_name)
                         comm_count += 1
             return comm_count
 
@@ -264,7 +269,7 @@ def init_model_parallel_info(names, sizes, verbose=False):
 #        comm_count = merge_comms(comm_count, ranks_lookup, "h", "w", "spatial")
 
         # merge matmul
-        comm_count = merge_comms(comm_count, ranks_lookup, "mlpi_matmul", "mlph_matmul", "matmul")
+        comm_count = merge_comms(comm_count, ranks_lookup, "row_matmul", "col_matmul", "matmul")
                     
         # now the data and model comm:
         model_groups = np.reshape(np.arange(0, world_size), (-1, model_parallel_size)).tolist()
@@ -274,6 +279,7 @@ def init_model_parallel_info(names, sizes, verbose=False):
                 if world_rank in grp:
                     _COMM_LIST.append(tmp_group)
                     _COMM_NAMES["model"] = comm_count
+                    _COMM_NAMES_META.append("model")
                     comm_count += 1
         
         if data_parallel_size == world_size:
@@ -292,6 +298,7 @@ def init_model_parallel_info(names, sizes, verbose=False):
                 if world_rank in grp:
                     _COMM_LIST.append(tmp_group)
                     _COMM_NAMES["data"] = comm_count
+                    _COMM_NAMES_META.append("data")
     
 #    if verbose and world_rank == 0:
 #        print(f"comm lists are: {_COMM_LIST}")
