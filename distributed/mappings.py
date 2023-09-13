@@ -7,7 +7,7 @@ from utils import comm
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 # helper functions
-from distributed.helpers import _reduce, _split
+from distributed.helpers import _reduce, _split, _gather
 
 
 class _CopyToParallelRegion(torch.autograd.Function):

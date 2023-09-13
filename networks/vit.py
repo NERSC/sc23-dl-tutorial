@@ -226,6 +226,8 @@ class VisionTransformer(nn.Module):
  
     def forward(self, x):
         x = self.prepare_tokens(x)
+
+        print("vit: x", x.shape)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
