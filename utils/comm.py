@@ -85,10 +85,10 @@ def get_local_rank():
 
 def get_names(meta=True):
     """Returns the names of all available communicators."""
-    if return_meta:
+    if meta:
         return _COMM_NAMES
     else:
-        return [c,v for c,v in _COMM_NAMES.items() if c not in _COMM_NAMES_META]
+        return [(c,v) for c,v in _COMM_NAMES.items() if c not in _COMM_NAMES_META]
 
 
 def is_distributed(name: str):

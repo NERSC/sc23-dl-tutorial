@@ -83,7 +83,6 @@ class Block(nn.Module):
         super().__init__()
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            assert( (norm_layer == nn.LayerNorm) or (norm_layer == DistributedLayerNorm))
             self.attn = DistributedAttention(
                 dim, comm_inp_name=comm_inp_name, comm_hidden_name=comm_hidden_name,
                 num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
@@ -158,10 +157,10 @@ class VisionTransformer(nn.Module):
         self.embed_dim_local = embed_dim // comm.get_size(comm_inp_name)
 
         # use embed_dim_in here, since we do not split the input channels. otherwise we might be blocked by number of input channels
-        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim_local)
+        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=self.embed_dim_local)
         num_patches = self.patch_embed.num_patches
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim_local))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim_local))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
@@ -175,7 +174,7 @@ class VisionTransformer(nn.Module):
             for i in range(depth)])
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm = DistributedLayerNorm([embed_dim], comm_inp_name)
+            self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name])
         else:
             self.norm = norm_layer(embed_dim)
         
@@ -183,7 +182,7 @@ class VisionTransformer(nn.Module):
         self.out_size_local = self.out_size // comm.get_size(comm_hidden_name)
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.head = DistributedMatmul(embed_dim_local, self.out_size_local, bias=False)
+            self.head = DistributedMatmul(self.embed_dim, self.out_size, comm_inp_name, comm_hidden_name, bias=False)
             self.gather_head = True
         else:
             self.head = nn.Linear(embed_dim, self.out_size, bias=False)
@@ -210,7 +209,7 @@ class VisionTransformer(nn.Module):
 
     def forward_head(self, x):
         B, _, _ = x.shape # B x N x embed_dim
-        x = x.reshape(B, self.patch_embed.h, self.patch_embed.w, self.embed_dim_in)
+        x = x.reshape(B, self.patch_embed.h, self.patch_embed.w, self.embed_dim_local)
         B, h, w, _ = x.shape
 
         # apply head and gather

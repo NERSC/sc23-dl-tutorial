@@ -3,12 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utils import comm
 
+from torch.cuda import amp
+
 from networks.helpers import trunc_normal_
 
 # matmul parallel
 from distributed.mappings import copy_to_parallel_region
 from distributed.mappings import reduce_from_parallel_region
-
+from typing import Tuple
 
 class DistributedMatmul(nn.Module):
     """Distributed Matrix Multiply"""
@@ -41,7 +43,7 @@ class DistributedMatmul(nn.Module):
         out_dim_local = out_dim // comm_out_size
 
         # parameters
-        comm_names_shared = [c for c,_ in comm.get_names(meta=False).items() if c not in [comm_inp_name, comm_out_name]]
+        comm_names_shared = [c for c in comm.get_names(meta=False) if c not in [comm_inp_name, comm_out_name]]
         self.weight = nn.Parameter(torch.ones(out_dim_local, inp_dim_local))
         self.weight.is_shared_mp = comm_names_shared
         self.weight.sharded_dims_mp = [
@@ -134,7 +136,11 @@ class DistributedLayerNorm(nn.Module):
             eps=1e-05,
             elementwise_affine=True):
 
-        super(self, DistributedLayerNorm).__init__()
+        super(DistributedLayerNorm, self).__init__()
+
+        if isinstance(normalized_shape, int):
+            normalized_shape = [normalized_shape]
+        
         # this can be tricky for arbitrary shapes, we would need to
         # make sure the comm names we give it are correct:
         # make sure each dim is associated with a comm, none is allowed:
@@ -147,13 +153,13 @@ class DistributedLayerNorm(nn.Module):
         self.gather_mode = 'welford'
 
         # get local shapes
-        normalized_shapes_local = [s // comm.get_size(c) for s,z in zip(self.normalized_shape, self.comm_names)]
+        normalized_shapes_local = [s // comm.get_size(c) for s,c in zip(self.normalized_shape, self.comm_names)]
         if self.elementwise_affine:
             self.weight = nn.Parameter(torch.ones(*normalized_shapes_local))
             self.bias = nn.Parameter(torch.ones(*normalized_shapes_local))
 
             # set sharing
-            comm_names_shared = [c for c,_ in comm.get_names(meta=False).items() if c not in comm_names]
+            comm_names_shared = [c for c in comm.get_names(meta=False) if c not in comm_names]
             self.weight.is_shared_mp = comm_names_shared
             self.bias.is_shared_mp = comm_names_shared
             
@@ -168,7 +174,7 @@ class DistributedLayerNorm(nn.Module):
 
     def _stats_welford(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Computes the statistics locally, then uses the Welford online algorithm to reduce them"""
-        var, mean = torch.var_mean(x, dim=self.normlized_shape, unbiased=False, keepdim=True)
+        var, mean = torch.var_mean(x, dim=self.normalized_shape, unbiased=False, keepdim=True)
         # workaround to not use shapes, as otherwise cuda graphs won't work
         count = torch.ones_like(x, requires_grad=False)
         count = torch.sum(count, dim=self.normalized_shape, keepdim=True)
@@ -232,7 +238,7 @@ class DistributedLayerNorm(nn.Module):
         if self.elementwise_affine:
             # reshape parameters
             padlen = x.dims() - len(self.normalized_shape)
-            newshape = [1 for range(padlen)] + [*self.normalized_shape]
+            newshape = [1 for _ in range(padlen)] + [*self.normalized_shape]
             x = self.weight.reshape(*newshape) * x + self.bias.reshape(*newshape)
 
         return x
@@ -259,17 +265,17 @@ class DistributedAttention(nn.Module):
         assert dim % num_heads == 0, 'dim should be divisible by num_heads'
         self.num_heads = num_heads
         self.head_dim = dim // num_heads
-        self.head_dim_local = self.head_dim // comm.get_size(comm_out_name)
+        self.head_dim_local = self.head_dim // comm.get_size(comm_hidden_name)
         self.scale = self.head_dim ** -0.5
 
         self.comm_inp_name = comm_inp_name
         self.comm_hidden_name = comm_hidden_name
-
+        
         self.qkv = DistributedMatmul(dim, dim * 3, comm_inp_name, comm_hidden_name, bias=qkv_bias)
         self.q_norm = norm_layer([self.head_dim], comm_hidden_name) if qk_norm else nn.Identity()
-	self.k_norm = norm_layer([self.head_dim], comm_hidden_name) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer([self.head_dim], comm_hidden_name) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
-	self.proj = DistributedMatmul(dim, dim, comm_hidden_name, comm_inp_name, bias=False)
+        self.proj = DistributedMatmul(dim, dim, comm_hidden_name, comm_inp_name, bias=False)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
