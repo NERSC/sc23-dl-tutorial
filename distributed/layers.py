@@ -156,10 +156,10 @@ class DistributedLayerNorm(nn.Module):
         print(self.normalized_shape, self.comm_names, self.normalized_dims)
         
         # get local shapes
-        normalized_shapes_local = [s // comm.get_size(c) for s,c in zip(self.normalized_shape, self.comm_names)]
+        self.normalized_shape_local = [s // comm.get_size(c) for s,c in zip(self.normalized_shape, self.comm_names)]
         if self.elementwise_affine:
-            self.weight = nn.Parameter(torch.ones(*normalized_shapes_local))
-            self.bias = nn.Parameter(torch.ones(*normalized_shapes_local))
+            self.weight = nn.Parameter(torch.ones(*self.normalized_shape_local))
+            self.bias = nn.Parameter(torch.ones(*self.normalized_shape_local))
 
             # set sharing
             comm_names_shared = [c for c in comm.get_names(meta=False) if c not in comm_names]
@@ -171,7 +171,7 @@ class DistributedLayerNorm(nn.Module):
         """Computes the statistics in the naive way by first gathering the tensors and then computing them"""
         for dim, cname in zip(self.normalized_dims, self.comm_names):
             x = gather_from_parallel_region(x, dim, cname)
-        var, mean = torch.var_mean(x, dim=normalized_shape, unbiased=False, keepdim=True)
+        var, mean = torch.var_mean(x, dim=self.normalized_dims, unbiased=False, keepdim=True)
 
         return var, mean
 
@@ -244,8 +244,8 @@ class DistributedLayerNorm(nn.Module):
         # affine transform if we use it
         if self.elementwise_affine:
             # reshape parameters
-            padlen = x.dim() - len(self.normalized_shape)
-            newshape = [1 for _ in range(padlen)] + [*self.normalized_shape]
+            padlen = x.dim() - len(self.normalized_shape_local)
+            newshape = [1 for _ in range(padlen)] + [*self.normalized_shape_local]
             x = self.weight.reshape(*newshape) * x + self.bias.reshape(*newshape)
 
         return x
