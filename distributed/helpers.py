@@ -22,10 +22,11 @@ def _reduce(input_, use_fp32=True, group=None):
     # All-reduce.
     if use_fp32:
         dtype = input_.dtype
-        inputf_ = input_.float()
+        inputf_ = input_.float().contiguous()
         dist.all_reduce(inputf_, group=group)
         input_ = inputf_.to(dtype)
     else:
+        input_ = input_.contiguous()
         dist.all_reduce(input_, group=group)
 
     return input_

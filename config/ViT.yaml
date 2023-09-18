@@ -51,12 +51,14 @@ short_opt:
   <<: *short
   data_loader_config: 'dali'
   num_data_workers: 8
+  global_batch_size: 1
 
 long_opt:
   <<: *short
   embed_dim: 1024
   data_loader_config: 'dali'
   num_data_workers: 8
+  global_batch_size: 64
 
 short_mp:
   <<: *short

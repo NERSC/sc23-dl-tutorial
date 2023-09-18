@@ -6,7 +6,7 @@
 #SBATCH --ntasks-per-node 4
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-node 4
-#SBATCH --time=00:30:00
+#SBATCH --time=00:15:00
 #SBATCH --image=nersc/pytorch:ngc-23.07-v0
 #SBATCH --module=gpu,nccl-2.18
 #SBATCH -J vit-era5
@@ -47,7 +47,7 @@ export CUDA_VISIBLE_DEVICES=3,2,1,0
 set -x
 srun -u shifter --env PYTHONUSERBASE=${env} -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
     bash -c "
-    pip install timm;
+    pip install timm pynvml;
     source export_DDP_vars.sh
     ${PROFILE_CMD} python train_mp.py ${args}
     "

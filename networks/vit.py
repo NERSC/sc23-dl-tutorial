@@ -86,7 +86,7 @@ class Block(nn.Module):
             self.attn = DistributedAttention(
                 dim, comm_inp_name=comm_inp_name, comm_hidden_name=comm_hidden_name,
                 num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
-                norm_layer=DistributedLayerNorm)
+                norm_layer=nn.LayerNorm)
         else:
             self.attn = Attention(
                 dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
@@ -94,8 +94,8 @@ class Block(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm1 = DistributedLayerNorm([dim], [comm_inp_name])
-            self.norm2 = DistributedLayerNorm([dim], [comm_inp_name])
+            self.norm1 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
+            self.norm2 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
         else:
             self.norm1 = norm_layer(dim)
             self.norm2 = norm_layer(dim)
@@ -174,7 +174,7 @@ class VisionTransformer(nn.Module):
             for i in range(depth)])
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name])
+            self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name], comm_inp_name)
         else:
             self.norm = norm_layer(embed_dim)
         
@@ -214,8 +214,10 @@ class VisionTransformer(nn.Module):
 
         # apply head and gather
         x = self.head(x)
+
+        # gather result
         if comm.get_size(self.comm_hidden_name) > 1:
-            x = gather_from_parallel_region(x, self.comm_hidden_name)
+            x = gather_from_parallel_region(x, -1, self.comm_hidden_name)
 
         # replace with pixel shuffle?
         x = x.reshape(shape=(B, h, w, self.patch_size, self.patch_size, self.out_ch))
@@ -227,7 +229,6 @@ class VisionTransformer(nn.Module):
     def forward(self, x):
         x = self.prepare_tokens(x)
 
-        print("vit: x", x.shape)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)

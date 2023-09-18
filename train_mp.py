@@ -3,6 +3,7 @@ import os
 import time
 import numpy as np
 import argparse
+import pynvml
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,7 @@ from torch.cuda.amp import autocast, GradScaler
 import torch.multiprocessing
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
+from torch.distributed import ReduceOp
 
 import logging
 from utils import logging_utils
@@ -42,7 +44,12 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
+    torch.autograd.set_detect_anomaly(True)
 
+    # init pynvml and get handle
+    pynvml.nvmlInit()
+    nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
+    
     # get data loader
     logging.info('rank %d, begin data loader init'%world_rank)
     train_data_loader, train_dataset, train_sampler = get_data_loader_distributed(params, params.train_data_path, params.distributed, train=True)
@@ -66,9 +73,12 @@ def train(params, args, local_rank, world_rank, world_size):
                                             bucket_cap_mb=args.bucket_cap_mb)
 
 
+    # print model and memory
     if world_rank == 0:
         print(model)
-            
+        all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+        print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
+    
     if params.enable_apex:
         optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
                                     adam_w_mode=False, set_grad_none=True)
@@ -106,13 +116,14 @@ def train(params, args, local_rank, world_rank, world_size):
         val_loss = loss_func(gen, tar)
         val_rmse = weighted_rmse(gen, tar)
         if params.distributed:
-            torch.distributed.all_reduce(tr_loss)
-            torch.distributed.all_reduce(val_loss)
-            torch.distributed.all_reduce(val_rmse)
+            torch.distributed.all_reduce(tr_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
+        
         if world_rank==0:
-            args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+            args.tboard_writer.add_scalar('Loss/train', tr_loss.item(), 0)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss.item(), 0)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], 0)
 
     iters = 0
     t1 = time.time()
@@ -169,8 +180,8 @@ def train(params, args, local_rank, world_rank, world_size):
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
 
             if params.distributed:
-                torch.distributed.all_reduce(loss)
-            tr_loss.append(loss.item()/world_size)
+                torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            tr_loss.append(loss.item())
 
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # step
 
@@ -211,10 +222,9 @@ def train(params, args, local_rank, world_rank, world_size):
                     loss = loss_func(gen, tar)
                     val_rmse += weighted_rmse(gen, tar)
                     if params.distributed:
-                        torch.distributed.all_reduce(loss)
-                        torch.distributed.all_reduce(val_rmse)
-                        val_rmse /= world_size
-                    val_loss.append(loss.item()/world_size)
+                        torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+                        torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
+                    val_loss.append(loss.item())
                 valid_steps += 1
 
         val_rmse /= valid_steps # Avg validation rmse

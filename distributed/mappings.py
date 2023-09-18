@@ -97,13 +97,13 @@ def gather_from_parallel_region(input_, dim, comm_name):
 
 
 def init_ddp_model_and_reduction_hooks(model,
-                                        device_ids,
-                                        output_device,
-                                        bucket_cap_mb = 25,
-                                        broadcast_buffers = True,
-                                        find_unused_parameters = False,
-                                        gradient_as_bucket_view = True,
-                                        static_graph = False):
+                                       device_ids,
+                                       output_device,
+                                       bucket_cap_mb = 25,
+                                       broadcast_buffers = True,
+                                       find_unused_parameters = False,
+                                       gradient_as_bucket_view = True,
+                                       static_graph = False):
     # early exit if we are not in a distributed setting:
     if not dist.is_initialized():
         return model
@@ -172,12 +172,16 @@ def init_ddp_model_and_reduction_hooks(model,
         for group in comm.get_names():
             if group == "data":
                 continue
+
+            # build list
             grads = []
             for p in params:
                 if group in p.is_shared_mp:
-                    grads.append(p.grad.data)
+                    if p.grad is not None:
+                        grads.append(p.grad.data)
             if not grads:
                 continue
+            
             # append the new reduction functions
             fut = fut.then(lambda x: grad_reduction(x, grads=grads, group=group))
 

@@ -1,3 +1,5 @@
+from math import sqrt
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -133,6 +135,7 @@ class DistributedLayerNorm(nn.Module):
             self,
             normalized_shape,
             comm_names,
+            comm_name_meta=None,
             eps=1e-05,
             elementwise_affine=True):
 
@@ -148,12 +151,11 @@ class DistributedLayerNorm(nn.Module):
         self.normalized_shape = normalized_shape
         self.normalized_dims = [i for i in range(-len(self.normalized_shape), 0)]
         self.comm_names = comm_names
+        self.comm_name_meta = comm_name_meta
         self.eps = eps
         self.elementwise_affine = elementwise_affine
         
         self.gather_mode = 'welford'
-
-        print(self.normalized_shape, self.comm_names, self.normalized_dims)
         
         # get local shapes
         self.normalized_shape_local = [s // comm.get_size(c) for s,c in zip(self.normalized_shape, self.comm_names)]
@@ -169,9 +171,14 @@ class DistributedLayerNorm(nn.Module):
 
     def _stats_naive(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Computes the statistics in the naive way by first gathering the tensors and then computing them"""
-        for dim, cname in zip(self.normalized_dims, self.comm_names):
-            x = gather_from_parallel_region(x, dim, cname)
-        var, mean = torch.var_mean(x, dim=self.normalized_dims, unbiased=False, keepdim=True)
+        if self.comm_name_meta is None:
+            for dim, cname in zip(self.normalized_dims, self.comm_names):
+                x = gather_from_parallel_region(x, dim, cname)
+            var, mean = torch.var_mean(x, dim=self.normalized_dims, unbiased=False, keepdim=True)
+        else:
+            x = x.unsqueeze(0)
+            x = gather_from_parallel_region(x, 0, self.comm_name_meta)
+            var, mean = torch.var_mean(x, dim=0, unbiased=False, keepdim=False)            
 
         return var, mean
 
@@ -179,14 +186,46 @@ class DistributedLayerNorm(nn.Module):
         """Computes the statistics locally, then uses the Welford online algorithm to reduce them"""
         var, mean = torch.var_mean(x, dim=self.normalized_dims, unbiased=False, keepdim=True)
         # workaround to not use shapes, as otherwise cuda graphs won't work
-        count = torch.ones_like(x, requires_grad=False)
-        count = torch.sum(count, dim=self.normalized_dims, keepdim=True)
+        with torch.no_grad():
+            count = torch.ones_like(x, requires_grad=False)
+            count = torch.sum(count, dim=self.normalized_dims, keepdim=True)
 
-        m2 = var * count
-        for dim, cname in zip(self.normalized_dims, self.comm_names):
-            m2s = torch.split(gather_from_parallel_region(m2, dim, cname), 1, dim)
-            means = torch.split(gather_from_parallel_region(mean, dim, cname), 1, dim)
-            counts = torch.split(gather_from_parallel_region(count, dim, cname), 1, dim)
+        if self.comm_name_meta is None:
+            for dim, cname in zip(self.normalized_dims, self.comm_names):
+                vars = gather_from_parallel_region(var, dim, cname)
+                means = gather_from_parallel_region(mean, dim, cname)
+                counts = gather_from_parallel_region(count, dim, cname)
+                m2s = vars * counts
+
+                m2s = [x.squeeze(dim) for x in torch.split(m2s, 1, dim)]
+                means = [x.squeeze(dim) for x in torch.split(means, 1, dim)]
+                counts = [x.squeeze(dim) for x in torch.split(counts, 1, dim)]
+
+                # initial values
+                mean = means[0]
+                m2 = m2s[0]
+                count = counts[0]
+
+                # use Welford's algorithm to accumulate them into a single mean and variance
+                for meani, m2i, counti in zip(means[1:], m2s[1:], counts[1:]):
+                    delta = meani - mean
+                    m2 = m2 + m2i + delta**2 * count * counti / (count + counti)
+                    mean = mean + delta * counti / (count + counti)
+
+                    # update the current count
+                    count = count + counti
+
+        else:
+            vars = gather_from_parallel_region(var.unsqueeze(0), 0, self.comm_name_meta)
+            means = gather_from_parallel_region(mean.unsqueeze(0), 0, self.comm_name_meta)
+            counts = gather_from_parallel_region(count.unsqueeze(0), 0, self.comm_name_meta)
+
+            m2s = vars * counts
+
+            # split into lists
+            m2s = [x.squeeze(0) for x in torch.split(m2s, 1, 0)]
+            means = [x.squeeze(0) for x in torch.split(means, 1, 0)]
+            counts = [x.squeeze(0) for x in torch.split(counts, 1, 0)]
 
             # initial values
             mean = means[0]
@@ -194,19 +233,16 @@ class DistributedLayerNorm(nn.Module):
             count = counts[0]
 
             # use Welford's algorithm to accumulate them into a single mean and variance
-            for meani, m2i, counti in zip(means[1:], m2s[1:], counts[1:]):
+            for meani, m2i, counti in zip(means[1:], m2s[1:], counts[1:]):                
                 delta = meani - mean
                 m2 = m2 + m2i + delta**2 * count * counti / (count + counti)
                 mean = mean + delta * counti / (count + counti)
-
-                # update the current count
+                
+		# update the current count
                 count = count + counti
 
         # finalize
         var = m2 / count
-
-        #var = var.reshape(1, -1, 1, 1)
-        #mean = mean.reshape(1, -1, 1, 1)
 
         return var, mean
 
@@ -226,21 +262,22 @@ class DistributedLayerNorm(nn.Module):
                 raise ValueError(f"Unknown gather mode {self.gather_mode}")
 
             # this is absolutely necessary to get the correct graph in the backward pass
-            for cname in self.comm_names:
-                mean = copy_to_parallel_region(mean, cname)
-                var = copy_to_parallel_region(var, cname)
+            if self.comm_name_meta is None:
+                for cname in self.comm_names:
+                    mean = copy_to_parallel_region(mean, cname)
+                    var = copy_to_parallel_region(var, cname)
+            else:
+                mean = copy_to_parallel_region(mean, self.comm_name_meta)
+                var = copy_to_parallel_region(var, self.comm_name_meta)
                 
+        # convert back
         x = x.to(dtype)
         mean = mean.to(dtype)
         var = var.to(dtype)
 
-        print("ln: x", x.shape)
-        print("ln: mean", mean.shape)
-        print("ln: var", var.shape)
-
         # apply the normalization
         x = (x - mean) / torch.sqrt(var + self.eps)
-
+        
         # affine transform if we use it
         if self.elementwise_affine:
             # reshape parameters
@@ -264,74 +301,44 @@ class DistributedAttention(nn.Module):
             qk_norm=False,
             attn_drop=0.,
             proj_drop=0.,
-            norm_layer=DistributedLayerNorm,
+            norm_layer=nn.LayerNorm,
     ):
 
         super(DistributedAttention, self).__init__()
 
-        assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+        assert(dim % num_heads == 0), 'dim should be divisible by num_heads'
         self.num_heads = num_heads
+        assert( (num_heads % comm.get_size(comm_hidden_name)) == 0), 'num_heads should be divisible by size of comm_hidden_name'
+        self.num_heads_local = num_heads // comm.get_size(comm_hidden_name)
         self.head_dim = dim // num_heads
-        self.head_dim_local = self.head_dim // comm.get_size(comm_hidden_name)
-        self.scale = self.head_dim ** -0.5
+        self.dim_local = self.head_dim * self.num_heads_local
+        #self.scale = 1. / sqrt(self.head_dim)
 
         self.comm_inp_name = comm_inp_name
         self.comm_hidden_name = comm_hidden_name
         
         self.qkv = DistributedMatmul(dim, dim * 3, comm_inp_name, comm_hidden_name, bias=qkv_bias)
-        self.q_norm = norm_layer([self.head_dim], comm_hidden_name) if qk_norm else nn.Identity()
-        self.k_norm = norm_layer([self.head_dim], comm_hidden_name) if qk_norm else nn.Identity()
+        self.q_norm = nn.LayerNorm(self.dim_local) if qk_norm else nn.Identity()
+        self.k_norm = nn.LayerNorm(self.dim_local) if qk_norm else nn.Identity()
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = DistributedMatmul(dim, dim, comm_hidden_name, comm_inp_name, bias=False)
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
         B, N, C = x.shape
-
-        print("x", x.shape)
         
         # qkx
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim_local).permute(2, 0, 3, 1, 4)
-
-        print("qkv", qkv.shape)
-        
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads_local, self.head_dim).permute(2, 0, 3, 1, 4)
         q, k, v = qkv.unbind(0)
         q, k = self.q_norm(q), self.k_norm(k)
 
-        print("q", q.shape)
-        print("k", k.shape)
-        print("v", v.shape)
+        x = F.scaled_dot_product_attention(
+            q, k, v,
+            dropout_p=self.attn_drop.p,
+        )
 
-        q = q * self.scale
-        attn = q @ k.transpose(-2, -1)
-
-        print("attn", attn.shape)
-        
-        attn = reduce_from_parallel_region(attn, self.comm_hidden_name)
-
-        print("attn_red", attn.shape)
-
-        # apply softmax, this is a local op
-        attn = attn.softmax(dim=-1)
-
-        print("attn_red_sm", attn.shape)
-
-        # this is local too
-        attn = self.attn_drop(attn)
-
-        # this is a local op since we contract over tokens
-        x = attn @ v
-
-        print("attn @ v", x.shape)
-
-        # transpose back
-        x = x.transpose(1, 2).reshape(B, N, C)
-
-        # this is distributed again
+        x = x.transpose(1, 2).reshape(B, -1, self.dim_local)
         x = self.proj(x)
-
-        # generally we have to be super careful with dropout layers, since
-        # those are normalized over the dropouts. That would need to be reduced across nodes
         x = self.proj_drop(x)
         
         return x
