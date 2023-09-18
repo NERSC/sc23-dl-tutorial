@@ -94,8 +94,11 @@ class Block(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm1 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
-            self.norm2 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
+            #self.norm1 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
+            #self.norm2 = DistributedLayerNorm([dim], [comm_inp_name], comm_inp_name)
+            # DEBUG
+            self.norm1 = norm_layer(dim // comm.get_size(comm_inp_name))
+            self.norm2 = norm_layer(dim // comm.get_size(comm_inp_name))
         else:
             self.norm1 = norm_layer(dim)
             self.norm2 = norm_layer(dim)
@@ -174,7 +177,9 @@ class VisionTransformer(nn.Module):
             for i in range(depth)])
 
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name], comm_inp_name)
+            #self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name], comm_inp_name)
+            # DEBUG
+            self.norm = norm_layer(embed_dim // comm.get_size(comm_inp_name))
         else:
             self.norm = norm_layer(embed_dim)
         

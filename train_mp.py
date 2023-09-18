@@ -44,7 +44,7 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
-    torch.autograd.set_detect_anomaly(True)
+    #torch.autograd.set_detect_anomaly(True)
 
     # init pynvml and get handle
     pynvml.nvmlInit()

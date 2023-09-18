@@ -155,12 +155,16 @@ def init_ddp_model_and_reduction_hooks(model,
 
     # define comm hook:
     def reduction_comm_hook(state: object, bucket: dist.GradBucket) -> torch.futures.Future[torch.Tensor]:
+        
         # allreduce everything first:
         buff = bucket.buffer()
+        
         # get future for allreduce
         fut = dist.all_reduce(buff, op=dist.ReduceOp.AVG, group=comm.get_group("data"), async_op=True).get_future()
+        
         # get grads for shared weights
         params = bucket.parameters()
+        
         def grad_reduction(fut, grads, group):
             # reduce remaining gradients
             coalesced = _flatten_dense_tensors(grads)
@@ -172,13 +176,14 @@ def init_ddp_model_and_reduction_hooks(model,
         for group in comm.get_names():
             if group == "data":
                 continue
-
+            
             # build list
             grads = []
             for p in params:
                 if group in p.is_shared_mp:
                     if p.grad is not None:
                         grads.append(p.grad.data)
+            
             if not grads:
                 continue
             
@@ -188,4 +193,5 @@ def init_ddp_model_and_reduction_hooks(model,
         return fut
     # register model comm hook
     model.register_comm_hook(state=None, hook=reduction_comm_hook)
+    
     return model

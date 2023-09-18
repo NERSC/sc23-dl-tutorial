@@ -186,9 +186,9 @@ class DistributedLayerNorm(nn.Module):
         """Computes the statistics locally, then uses the Welford online algorithm to reduce them"""
         var, mean = torch.var_mean(x, dim=self.normalized_dims, unbiased=False, keepdim=True)
         # workaround to not use shapes, as otherwise cuda graphs won't work
-        with torch.no_grad():
-            count = torch.ones_like(x, requires_grad=False)
-            count = torch.sum(count, dim=self.normalized_dims, keepdim=True)
+        #with torch.no_grad():
+        count = torch.ones_like(x, requires_grad=False)
+        count = torch.sum(count, dim=self.normalized_dims, keepdim=True)
 
         if self.comm_name_meta is None:
             for dim, cname in zip(self.normalized_dims, self.comm_names):
