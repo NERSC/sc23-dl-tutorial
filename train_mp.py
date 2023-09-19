@@ -25,6 +25,7 @@ from utils.metrics import weighted_rmse
 from networks import vit
 
 from distributed.mappings import init_ddp_model_and_reduction_hooks
+from distributed.helpers import sync_params
 
 import apex.optimizers as aoptim
 
@@ -65,19 +66,19 @@ def train(params, args, local_rank, world_rank, world_size):
 
     # create model
     model = vit.ViT(params).to(device)
+
     
     if params.amp_dtype == torch.float16: 
         scaler = GradScaler()
+
+    # weight initialization needs to be synced across shared weights
+    if comm.get_size("model") > 1:
+        sync_params(model)
+
     if params.distributed and not args.noddp:
-        if args.disable_broadcast_buffers: 
-            model = init_ddp_model_and_reduction_hooks(model, device_ids=[local_rank],
-                                            output_device=[local_rank],
-                                            bucket_cap_mb=args.bucket_cap_mb,
-                                            broadcast_buffers=False)
-        else:
-            model = init_ddp_model_and_reduction_hooks(model, device_ids=[local_rank],
-                                            output_device=[local_rank],
-                                            bucket_cap_mb=args.bucket_cap_mb)
+        model = init_ddp_model_and_reduction_hooks(model, device_ids=[local_rank],
+                                                   output_device=[local_rank],
+                                                   bucket_cap_mb=args.bucket_cap_mb)
 
 
     if world_rank == 0:

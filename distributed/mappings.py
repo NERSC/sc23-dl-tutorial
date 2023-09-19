@@ -71,13 +71,13 @@ def gather_from_parallel_region(input_, dim, comm_name):
 
 
 def init_ddp_model_and_reduction_hooks(model,
-                                        device_ids,
-                                        output_device,
-                                        bucket_cap_mb = 25,
-                                        broadcast_buffers = True,
-                                        find_unused_parameters = False,
-                                        gradient_as_bucket_view = True,
-                                        static_graph = False):
+                                       device_ids,
+                                       output_device,
+                                       bucket_cap_mb = 25,
+                                       broadcast_buffers = True,
+                                       find_unused_parameters = False,
+                                       gradient_as_bucket_view = True,
+                                       static_graph = False):
     # early exit if we are not in a distributed setting:
     if not dist.is_initialized():
         return model
@@ -94,9 +94,10 @@ def init_ddp_model_and_reduction_hooks(model,
         num_parameters_total = 0
         num_parameters_shared_model = 0
         for param in model.parameters():
-            # if it does not have any annotation, we assume it is shared between all model ranks
-            if not hasattr(param, "is_shared_mp"):
-                param.is_shared_mp = ["model"]
+#            # if it does not have any annotation, we assume it is shared between all model ranks
+#            # not needed here, sync_params annotates everything
+#            if not hasattr(param, "is_shared_mp"):
+#                param.is_shared_mp = ["model"]
             # add the sharing type to the dict
             num_parameters_total += 1
             if "model" in param.is_shared_mp:

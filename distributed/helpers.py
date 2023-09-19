@@ -10,6 +10,27 @@ def get_memory_format(tensor):
         return torch.channels_last
     else:
         return torch.contiguous_format
+
+def sync_params(model):
+    """Helper routine to ensure shared weights are the same after initialization"""
+    with torch.no_grad():
+        # distributed sync step
+        for param in model.parameters():
+            if not hasattr(param, "is_shared_mp"):
+                param.is_shared_mp = ["model"]
+
+            for comm_group in param.is_shared_mp:
+                if comm.get_size(comm_group) > 1:
+                    tlist = [
+                        torch.empty_like(param)
+                        for x in range(comm.get_size(comm_group))
+                    ]
+                    tlist[comm.get_rank(comm_group)] = param
+                    # gather all weights in the comm group
+                    dist.all_gather(tlist, param, group=comm.get_group(comm_group))
+                    # use weight of rank 0
+                    # important to use copy here otherwise the handle gets detaches from the optimizer
+                    param.copy_(tlist[0])
  
 # distributed primitives
 def _reduce(input_, use_fp32=True, group=None):
