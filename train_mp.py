@@ -332,6 +332,10 @@ if __name__ == '__main__':
         # Compute local batch size based on number of ranks
         params.local_batch_size = int(params["global_batch_size"] // comm.get_size("data"))
 
+    # for data loader, set the actual number of data shards and id
+    params.data_num_shards = comm.get_size("data")
+    params.data_shard_id = comm.get_rank("data")
+
     # Set up directory
     baseDir = params.expdir
     expDir = os.path.join(baseDir, args.config + '/%dGPU/'%(world_size) + str(run_num) + '/')
