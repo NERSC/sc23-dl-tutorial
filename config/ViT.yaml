@@ -63,7 +63,7 @@ short_mp:
   <<: *short
   num_epochs: 1
   num_data_workers: 8
-  global_batch_size: 64
-  embed_dim: 768
+  data_loader_config: 'dali'
+  embed_dim: 1024
   depth: 12
-  num_heads: 8
+  num_heads: 16

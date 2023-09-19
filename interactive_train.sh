@@ -14,7 +14,7 @@ config="short_mp"
 run_num="test"
 amp_mode="fp16"
 col_parallel_size=1
-row_parallel_size=1
+row_parallel_size=4
 local_batch_size=32
 cmd="python train_mp.py --local_batch_size=$local_batch_size --row_parallel_size=$row_parallel_size --col_parallel_size=$col_parallel_size --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
 

@@ -172,7 +172,6 @@ def train(params, args, local_rank, world_rank, world_size):
                 loss = loss_func(gen, tar)
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() #forward
 
-            print_mem(world_rank, "after fwd")
             if world_rank == 0:
                 all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
                 print(f" after fwd: {all_mem_gb} GB.")
@@ -189,7 +188,6 @@ def train(params, args, local_rank, world_rank, world_size):
                 optimizer.step()
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
 
-            print_mem(world_rank, "after bwd")
             if world_rank == 0:
                 all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
                 print(f" after bwd: {all_mem_gb} GB.")
