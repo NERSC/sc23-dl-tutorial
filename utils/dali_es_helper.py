@@ -65,7 +65,7 @@ class HDF5ES(object):
                         cpx.zeros_pinned((self.n_out_channels, self.img_shape_x, self.img_shape_y), dtype=np.float32)]    
     
     def __len__(self):
-        return self.n_samples_shard
+        return self.num_steps_per_epoch
 
     def __del__(self):
         for f in self.files:

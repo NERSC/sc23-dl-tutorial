@@ -14,7 +14,17 @@ def worker_init(wrk_id):
 
 def get_data_loader(params, files_pattern, distributed, train):
     dataset = GetDataset(params, files_pattern, train)
-    sampler = DistributedSampler(dataset, shuffle=train) if distributed else None
+
+    if distributed:
+        if hasattr(params, 'data_num_shards'):
+            # this is for model parallelism
+            assert hasattr(params, 'data_shard_id'), 'please set data_num_shards and data_shard_id'
+            sampler = DistributedSampler(dataset, shuffle=train, num_replicas=params.data_num_shards, rank=params.data_shard_id)
+        else:
+            sampler = DistributedSampler(dataset, shuffle=train)
+    else:
+        sampler = None
+
     
     dataloader = DataLoader(dataset,
                             batch_size=int(params.local_batch_size),
