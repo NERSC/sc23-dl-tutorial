@@ -3,6 +3,7 @@ import os
 import time
 import numpy as np
 import argparse
+import pynvml
 
 import torch
 import torch.nn as nn
@@ -11,6 +12,7 @@ from torch.cuda.amp import autocast, GradScaler
 import torch.multiprocessing
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
+from torch.distributed import ReduceOp
 
 import logging
 from utils import logging_utils
@@ -25,6 +27,13 @@ from networks import vit
 from distributed.mappings import init_ddp_model_and_reduction_hooks
 
 import apex.optimizers as aoptim
+
+def print_mem(rank, string):
+    if rank == 0:
+        print(string)
+        print("torch.cuda.memory_allocated: %fGB"%(torch.cuda.memory_allocated(0)/1024/1024/1024))
+        print("torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(0)/1024/1024/1024))
+        print("torch.cuda.max_memory_reserved: %fGB"%(torch.cuda.max_memory_reserved(0)/1024/1024/1024))
 
 def compute_grad_norm(p_list, device):
     norm_type = 2.0
@@ -42,6 +51,11 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
+    torch.autograd.set_detect_anomaly(True)
+
+    # init pynvml and get handle
+    pynvml.nvmlInit()
+    nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
 
     # get data loader
     logging.info('rank %d, begin data loader init'%world_rank)
@@ -68,6 +82,8 @@ def train(params, args, local_rank, world_rank, world_size):
 
     if world_rank == 0:
         print(model)
+        all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+        print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
             
     if params.enable_apex:
         optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
@@ -106,13 +122,13 @@ def train(params, args, local_rank, world_rank, world_size):
         val_loss = loss_func(gen, tar)
         val_rmse = weighted_rmse(gen, tar)
         if params.distributed:
-            torch.distributed.all_reduce(tr_loss)
-            torch.distributed.all_reduce(val_loss)
-            torch.distributed.all_reduce(val_rmse)
+            torch.distributed.all_reduce(tr_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
         if world_rank==0:
-            args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+            args.tboard_writer.add_scalar('Loss/train', tr_loss.item(), 0)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss.item(), 0)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], 0)
 
     iters = 0
     t1 = time.time()
@@ -129,7 +145,7 @@ def train(params, args, local_rank, world_rank, world_size):
         model.train()
         step_count = 0
         for i, data in enumerate(train_data_loader, 0):
-            if i>10:
+            if i>0:
                 break
             if (args.enable_manual_profiling and world_rank==0):
                 if (epoch == 3 and i == 0):
@@ -156,6 +172,11 @@ def train(params, args, local_rank, world_rank, world_size):
                 loss = loss_func(gen, tar)
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() #forward
 
+            print_mem(world_rank, "after fwd")
+            if world_rank == 0:
+                all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+                print(f" after fwd: {all_mem_gb} GB.")
+
             if params.amp_dtype == torch.float16: 
                 scaler.scale(loss).backward()
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"optimizer")
@@ -168,9 +189,14 @@ def train(params, args, local_rank, world_rank, world_size):
                 optimizer.step()
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
 
+            print_mem(world_rank, "after bwd")
+            if world_rank == 0:
+                all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+                print(f" after bwd: {all_mem_gb} GB.")
+
             if params.distributed:
-                torch.distributed.all_reduce(loss)
-            tr_loss.append(loss.item()/world_size)
+                torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            tr_loss.append(loss.item())
 
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # step
 
@@ -203,7 +229,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
         with torch.no_grad():
             for i, data in enumerate(val_data_loader, 0):
-                if i>10:
+                if i>0:
                     break
                 with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
                     inp, tar = map(lambda x: x.to(device), data)
@@ -211,10 +237,9 @@ def train(params, args, local_rank, world_rank, world_size):
                     loss = loss_func(gen, tar)
                     val_rmse += weighted_rmse(gen, tar)
                     if params.distributed:
-                        torch.distributed.all_reduce(loss)
-                        torch.distributed.all_reduce(val_rmse)
-                        val_rmse /= world_size
-                    val_loss.append(loss.item()/world_size)
+                        torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+                        torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
+                    val_loss.append(loss.item())
                 valid_steps += 1
 
         val_rmse /= valid_steps # Avg validation rmse
@@ -226,8 +251,10 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
             args.tboard_writer.flush()
 
+    torch.cuda.synchronize()
     t2 = time.time()
     tottime = t2 - t1
+    pynvml.nvmlShutdown()
 
 
 if __name__ == '__main__':

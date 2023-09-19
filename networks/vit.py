@@ -6,8 +6,7 @@ from networks.helpers import DropPath, trunc_normal_
 
 # mp stuff
 from utils import comm
-from distributed.mappings import gather_from_parallel_region
-from distributed.layers import DistributedMatmul, DistributedMLP, DistributedLayerNorm, DistributedAttention
+from distributed.layers import DistributedMatmul, DistributedMLP, DistributedAttention
 
 class MLP(nn.Module):
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
@@ -86,26 +85,23 @@ class Block(nn.Module):
             self.attn = DistributedAttention(
                 dim, comm_inp_name=comm_inp_name, comm_hidden_name=comm_hidden_name,
                 num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
-                norm_layer=DistributedLayerNorm)
+                norm_layer=norm_layer)
         else:
             self.attn = Attention(
                 dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop,
                 norm_layer=norm_layer)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-        if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm1 = DistributedLayerNorm([dim], [comm_inp_name])
-            self.norm2 = DistributedLayerNorm([dim], [comm_inp_name])
-        else:
-            self.norm1 = norm_layer(dim)
-            self.norm2 = norm_layer(dim)
+        self.norm1 = norm_layer(dim)
+        self.norm2 = norm_layer(dim)
+
         mlp_hidden_dim = int(dim * mlp_ratio)
          
         # distribute MLP for model parallelism
         if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
             self.mlp = DistributedMLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop,
-                                      comm_inp_name=comm_inp_name, # dont shard the input
-                                      comm_hidden_name=comm_hidden_name # use the channel matmul group to shard the hidden dim
+                                      comm_inp_name=comm_inp_name,
+                                      comm_hidden_name=comm_hidden_name
                                       )
         else:
             self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
@@ -153,18 +149,13 @@ class VisionTransformer(nn.Module):
         self.comm_inp_name = comm_inp_name
         self.comm_hidden_name = comm_hidden_name
 
-        # split embed dim
-        self.embed_dim_local = embed_dim // comm.get_size(comm_inp_name)
-
-        # use embed_dim_in here, since we do not split the input channels. otherwise we might be blocked by number of input channels
-        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=self.embed_dim_local)
+        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=self.embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim_local))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, self.embed_dim))
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-
         
         self.blocks = nn.ModuleList([
             Block(
@@ -173,20 +164,11 @@ class VisionTransformer(nn.Module):
                 comm_inp_name=comm_inp_name, comm_hidden_name=comm_hidden_name)
             for i in range(depth)])
 
-        if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.norm = DistributedLayerNorm([embed_dim], [comm_inp_name])
-        else:
-            self.norm = norm_layer(embed_dim)
+        self.norm = norm_layer(embed_dim)
         
         self.out_size = self.out_ch * self.patch_size * self.patch_size
-        self.out_size_local = self.out_size // comm.get_size(comm_hidden_name)
 
-        if (comm.get_size(comm_inp_name) * comm.get_size(comm_hidden_name)) > 1:
-            self.head = DistributedMatmul(self.embed_dim, self.out_size, comm_inp_name, comm_hidden_name, bias=False)
-            self.gather_head = True
-        else:
-            self.head = nn.Linear(embed_dim, self.out_size, bias=False)
-            self.gather_head = False
+        self.head = nn.Linear(embed_dim, self.out_size, bias=False)
 
         trunc_normal_(self.pos_embed, std=.02)
         self.apply(self._init_weights)
@@ -209,14 +191,11 @@ class VisionTransformer(nn.Module):
 
     def forward_head(self, x):
         B, _, _ = x.shape # B x N x embed_dim
-        x = x.reshape(B, self.patch_embed.h, self.patch_embed.w, self.embed_dim_local)
+        x = x.reshape(B, self.patch_embed.h, self.patch_embed.w, self.embed_dim)
         B, h, w, _ = x.shape
 
-        # apply head and gather
+        # apply head
         x = self.head(x)
-        if comm.get_size(self.comm_hidden_name) > 1:
-            x = gather_from_parallel_region(x, self.comm_hidden_name)
-
         # replace with pixel shuffle?
         x = x.reshape(shape=(B, h, w, self.patch_size, self.patch_size, self.out_ch))
         x = torch.einsum("nhwpqc->nchpwq", x)
@@ -226,8 +205,6 @@ class VisionTransformer(nn.Module):
  
     def forward(self, x):
         x = self.prepare_tokens(x)
-
-        print("vit: x", x.shape)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
@@ -239,7 +216,7 @@ def ViT(params, **kwargs):
                    img_size=params.img_size,
                    in_chans=params.n_in_channels, out_chans=params.n_out_channels,
                    patch_size=params.patch_size, 
-                   embed_dim=params.embed_dim, depth=params.depth, num_heads=8, mlp_ratio=4,
+                   embed_dim=params.embed_dim, depth=params.depth, num_heads=params.num_heads, mlp_ratio=4,
                    qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),
                    drop_path_rate=params.dropout,
                    drop_rate=params.dropout,

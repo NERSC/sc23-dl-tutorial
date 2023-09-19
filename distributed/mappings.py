@@ -7,7 +7,7 @@ from utils import comm
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 # helper functions
-from distributed.helpers import _reduce, _split, _gather
+from distributed.helpers import _reduce
 
 
 class _CopyToParallelRegion(torch.autograd.Function):
@@ -53,33 +53,7 @@ class _ReduceFromParallelRegion(torch.autograd.Function):
     def backward(ctx, grad_output):  # pragma: no cover
         return grad_output, None
 
-    
-class _GatherFromParallelRegion(torch.autograd.Function):
-    """Gather the input from parallel region and concatenate."""
-
-    @staticmethod
-    def symbolic(graph, input_, dim_, comm_id_): # pragma: no cover 
-        if comm.is_distributed(comm_id_):
-            return _gather(input_, dim_, group=comm.get_group(comm_id_))
-        else:
-            return input_
-
-    @staticmethod
-    def forward(ctx, input_, dim_, comm_id_): # pragma: no cover 
-        ctx.dim = dim_
-        ctx.comm_id = comm_id_
-        if comm.is_distributed(comm_id_):
-            return _gather(input_, dim_, group=comm.get_group(comm_id_))
-        else:
-            return input_
-
-    @staticmethod
-    def backward(ctx, grad_output): # pragma: no cover 
-        if comm.is_distributed(ctx.comm_id):
-            return _split(grad_output, ctx.dim, group=comm.get_group(ctx.comm_id)), None, None
-        else:
-            return grad_output, None, None
-    
+     
 # matmul parallel
 def copy_to_parallel_region(input_, comm_name):  # pragma: no cover
     """Parallel copy helper"""

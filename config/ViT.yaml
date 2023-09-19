@@ -5,6 +5,7 @@ base: &base
   depth: 12
   dropout: 0
   patch_size: 8
+  num_heads: 8
 
   # Training config
   img_size: [360, 720]
@@ -60,5 +61,9 @@ long_opt:
 
 short_mp:
   <<: *short
+  num_epochs: 1
   num_data_workers: 8
   global_batch_size: 64
+  embed_dim: 768
+  depth: 12
+  num_heads: 8
