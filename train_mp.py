@@ -145,9 +145,8 @@ def train(params, args, local_rank, world_rank, world_size):
 
         model.train()
         step_count = 0
+
         for i, data in enumerate(train_data_loader, 0):
-            if i>0:
-                break
             if (args.enable_manual_profiling and world_rank==0):
                 if (epoch == 3 and i == 0):
                     torch.cuda.profiler.start()
@@ -173,9 +172,9 @@ def train(params, args, local_rank, world_rank, world_size):
                 loss = loss_func(gen, tar)
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() #forward
 
-            if world_rank == 0:
+            if world_rank == 0 and i == 1:
                 all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
-                print(f" after fwd: {all_mem_gb} GB.")
+                logging.info(f" Memory usage after forward pass: {all_mem_gb} GB.")
 
             if params.amp_dtype == torch.float16: 
                 scaler.scale(loss).backward()
@@ -188,10 +187,6 @@ def train(params, args, local_rank, world_rank, world_size):
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"optimizer")
                 optimizer.step()
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
-
-            if world_rank == 0:
-                all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
-                print(f" after bwd: {all_mem_gb} GB.")
 
             if params.distributed:
                 torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
@@ -228,8 +223,6 @@ def train(params, args, local_rank, world_rank, world_size):
 
         with torch.no_grad():
             for i, data in enumerate(val_data_loader, 0):
-                if i>0:
-                    break
                 with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
                     inp, tar = map(lambda x: x.to(device), data)
                     gen = model(inp)

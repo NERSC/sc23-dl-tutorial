@@ -46,24 +46,12 @@ short: &short
   num_epochs: 10
   num_data_workers: 8
   global_batch_size: 64
+  embed_dim: 1024
 
 # Short config with full optimizations
 short_opt:
   <<: *short
+  global_batch_size: 16
   data_loader_config: 'dali'
   num_data_workers: 8
-
-long_opt:
-  <<: *short
   embed_dim: 1024
-  data_loader_config: 'dali'
-  num_data_workers: 8
-
-short_mp:
-  <<: *short
-  num_epochs: 1
-  num_data_workers: 8
-  data_loader_config: 'dali'
-  embed_dim: 1024
-  depth: 12
-  num_heads: 16

@@ -2,7 +2,7 @@
 #SBATCH -C gpu 
 #SBATCH --nodes=1
 #SBATCH -q regular
-#SBATCH -A nvendor
+#SBATCH -A nstaff
 #SBATCH --ntasks-per-node 4
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-node 4
@@ -14,18 +14,16 @@
 
 DATADIR=/pscratch/sd/s/shas1693/data/sc23_tutorial_data/downsampled
 LOGDIR=${SCRATCH}/sc23-dl-tutorial/logs
-env=~/.local/perlmutter/nersc_pytorch_ngc-23.07-v0
 mkdir -p ${LOGDIR}
 
 config_file=./config/ViT.yaml
-config="short_opt" #"short_opt"
+config="short_opt"
 run_num="test"
 amp_mode="fp16"
-col_parallel_size=2
-row_parallel_size=2
+col_parallel_size=1
+row_parallel_size=4
 args="--col_parallel_size=$col_parallel_size --row_parallel_size=$row_parallel_size --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
 
-#args="${@}"
 
 export FI_MR_CACHE_MONITOR=userfaultfd
 export NCCL_NET_GDR_LEVEL=PHB
@@ -45,9 +43,8 @@ export MASTER_ADDR=$(hostname)
 export CUDA_VISIBLE_DEVICES=3,2,1,0
 
 set -x
-srun -u shifter --env PYTHONUSERBASE=${env} -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
+srun -u shifter -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
     bash -c "
-    pip install timm;
     source export_DDP_vars.sh
     ${PROFILE_CMD} python train_mp.py ${args}
     "
