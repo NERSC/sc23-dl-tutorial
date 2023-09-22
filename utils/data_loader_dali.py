@@ -35,7 +35,7 @@ class DaliDataLoader(object):
                             device_id = self.device_index,
                             py_num_workers = self.num_data_workers,
                             py_start_method='spawn',
-                            seed = self.global_seed)
+                            seed = self.model_seed)
         
      
         with pipeline: # get input and target 
@@ -50,7 +50,7 @@ class DaliDataLoader(object):
                                                               self.num_shards,
                                                               self.shard_id,
                                                               enable_logging = False,
-                                                              seed=333),
+                                                              seed=self.global_seed),
                                           num_outputs = 2,
                                           layout = ["CHW", "CHW"],
                                           batch = False,
@@ -129,7 +129,7 @@ class DaliDataLoader(object):
                                self.n_out_channels,
                                self.num_shards,
                                self.shard_id,
-                               seed=333)
+                               seed=self.global_seed)
         self.num_batches = extsource.num_steps_per_epoch
         del extsource
  
