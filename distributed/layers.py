@@ -43,6 +43,7 @@ class DistributedMatmul(nn.Module):
         out_dim_local = out_dim // comm_out_size
 
         # parameters
+        # weights are shared on all comm dims other than the ones used (comm_inp_name, comm_out_name)
         comm_names_shared = [c for c in comm.get_names(meta=False) if c not in [comm_inp_name, comm_out_name]]
         self.weight = nn.Parameter(torch.ones(out_dim_local, inp_dim_local))
         self.weight.is_shared_mp = comm_names_shared

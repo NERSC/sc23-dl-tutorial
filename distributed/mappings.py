@@ -150,7 +150,8 @@ def init_ddp_model_and_reduction_hooks(model,
             grads = []
             for p in params:
                 if group in p.is_shared_mp:
-                    grads.append(p.grad.data)
+                    if p.grad is not None:
+                        grads.append(p.grad.data)
             if not grads:
                 continue
             # append the new reduction functions

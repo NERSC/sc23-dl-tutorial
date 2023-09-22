@@ -88,7 +88,7 @@ def get_names(meta=True):
     if meta:
         return _COMM_NAMES
     else:
-        return [(c,v) for c,v in _COMM_NAMES.items() if c not in _COMM_NAMES_META]
+        return [c for c,v in _COMM_NAMES.items() if c not in _COMM_NAMES_META]
 
 
 def is_distributed(name: str):
@@ -230,12 +230,14 @@ def init_model_parallel_info(names, sizes, verbose=False):
                     print(f'Creating comm groups for id {merge_name}: {ranks_lookup[comm_name_2]}')
                 _COMM_LIST.append(get_group(comm_name_2))
                 _COMM_NAMES[merge_name] = comm_count
+                _COMM_NAMES_META.append(merge_name)
                 comm_count += 1
             elif ((get_size(comm_name_1) > 1) and (get_size(comm_name_2) == 1)):
                 if verbose and world_rank == 0:
                     print(f'Creating comm groups for id {merge_name}: {ranks_lookup[comm_name_1]}')
                 _COMM_LIST.append(get_group(comm_name_1))
                 _COMM_NAMES[merge_name] = comm_count
+                _COMM_NAMES_META.append(merge_name)
                 comm_count += 1
             elif ((get_size(comm_name_1) > 1) and (get_size(comm_name_2) > 1)):
                 # fuse the lists:
