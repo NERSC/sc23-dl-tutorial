@@ -106,12 +106,10 @@ class Block(nn.Module):
         else:
             self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
 
-    def forward(self, x, return_attention=False):
+    def forward(self, x):
         y = self.attn(self.norm1(x))
         x = x + self.drop_path(y)
-        x = self.norm2(x)
-        x = self.mlp(x)
-        x = x + self.drop_path(x)
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
 

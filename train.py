@@ -286,6 +286,10 @@ if __name__ == '__main__':
         # Compute local batch size based on number of ranks
         params.local_batch_size = params.global_batch_size//world_size
 
+    # for dali data loader, set the actual number of data shards and id
+    params.data_num_shards = world_size
+    params.data_shard_id = world_rank
+
     # Set up directory
     baseDir = params.expdir
     expDir = os.path.join(baseDir, args.config + '/%dGPU/'%(world_size) + str(run_num) + '/')

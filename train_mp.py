@@ -29,6 +29,8 @@ from distributed.helpers import sync_params
 
 import apex.optimizers as aoptim
 
+from utils.plots import generate_images
+
 def print_mem(rank, string):
     if rank == 0:
         print(string)
@@ -241,6 +243,8 @@ def train(params, args, local_rank, world_rank, world_size):
             logging.info('  Total validation time: {} sec'.format(val_end - val_start)) 
             args.tboard_writer.add_scalar('Loss/valid', np.mean(val_loss), iters)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
+            fig = generate_images([inp, tar, gen])
+            args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
             args.tboard_writer.flush()
 
     torch.cuda.synchronize()
@@ -332,7 +336,7 @@ if __name__ == '__main__':
 
     # Set up directory
     baseDir = params.expdir
-    expDir = os.path.join(baseDir, args.config + '/%dGPU/'%(world_size) + str(run_num) + '/')
+    expDir = os.path.join(baseDir, args.config + '/%dMP/'%(comm.get_size("model")) + str(run_num) + '/')
     if world_rank==0:
         if not os.path.isdir(expDir):
             os.makedirs(expDir)
