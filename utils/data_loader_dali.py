@@ -48,6 +48,7 @@ class DaliDataLoader(object):
                                                               self.n_out_channels,
                                                               self.num_shards,
                                                               self.shard_id,
+                                                              self.limit_nsamples,
                                                               enable_logging = False,
                                                               seed=333),
                                           num_outputs = 2,
@@ -90,6 +91,7 @@ class DaliDataLoader(object):
         self.n_in_channels = params.n_in_channels
         self.n_out_channels = params.n_out_channels
         self.img_size = params.img_size
+        self.limit_nsamples = params.limit_nsamples if train else params.limit_nsamples_val
 
         # load stats
         self.normalize = True
@@ -120,6 +122,7 @@ class DaliDataLoader(object):
                                self.n_out_channels,
                                self.num_shards,
                                self.shard_id,
+                               self.limit_nsamples,
                                seed=333)
         self.num_batches = extsource.num_steps_per_epoch
         del extsource
