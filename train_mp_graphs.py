@@ -102,7 +102,6 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
-    torch.autograd.set_detect_anomaly(True)
 
     # init pynvml and get handle
     pynvml.nvmlInit()
@@ -128,11 +127,11 @@ def train(params, args, local_rank, world_rank, world_size):
         sync_params(model)
 
     capture_stream = torch.cuda.Stream()
-    with torch.cuda.stream(capture_stream):
-        if params.distributed:
+    if params.distributed:
+        with torch.cuda.stream(capture_stream):
             model = init_ddp_model_and_reduction_hooks(model, device_ids=[local_rank],
-                                                       output_device=[local_rank],
-                                                       bucket_cap_mb=args.bucket_cap_mb)
+                                                    output_device=[local_rank],
+                                                    bucket_cap_mb=args.bucket_cap_mb)
     capture_stream.synchronize()
 
 
