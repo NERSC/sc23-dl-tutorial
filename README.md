@@ -18,7 +18,7 @@ For interactive jobs, you can run the Python script directly using the following
 python train.py --config=short --num_epochs 4
 ```
 This will run 4 epochs of training on a single GPU using a default batch size of 16.
-See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details. For 
+See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
@@ -80,7 +80,7 @@ This command will run four epochs of the training script, profiling only the las
 Loading this profile ([`baseline.nsys-rep`](sample_nsys_profiles/baseline.nsys-rep)) in Nsight Systems will look like this:
 ![NSYS Baseline](tutorial_images/nsys_baseline.png)
 
-From this zoomed out view, we can see a lot idle gaps between iterations. These gaps are due to the data loading, which we will address in the next section.
+From this zoomed out view, we can see some idle gaps between training iterations. These gaps are due to the data loading, which we will address in the next section.
 
 Beyond this, we can zoom into a single iteration and get an idea of where compute time is being spent:
 ![NSYS Baseline zoomed](tutorial_images/nsys_baseline_zoomed.png)
@@ -173,13 +173,13 @@ argument and load that profile in Nsight Systems. This is what this profile ([`4
 and zoomed in:
 ![NSYS Native Data Zoomed](tutorial_images/nsys_nativedata_4workers_zoomed.png)
 
-With 4 data workers, the large gaps between steps somewhat alleviated, improving the throughput. However, from the zoomed out view, we still see large gaps between groups of 16 iterations. Looking at the zoomed in profile, we
-still see that the H2D copy in of the input data takes some time and runs in same CUDA stream as the compute. One option here is to implement a prefetching
+With 4 data workers, the idle gaps between steps are resolved, improving the throughput. Looking at the zoomed in profile, we
+still see that the H2D copy in of the input data (i.e. the light green activity at the beginning of the step) takes some time and runs in same CUDA stream as the compute. One option here is to implement a prefetching
 mechanism in PyTorch directly using CUDA streams to concurrently load and copy in the next batch of input during the current batch, however
-this is left as an exercise outside of this tutorial. A good example of this can be found in [here](https://github.com/NVIDIA/DeepLearningExamples/blob/master/PyTorch/Classification/ConvNets/image_classification/dataloaders.py#L347).
+this is left as an exercise outside of this tutorial. A good example of this can be found in [here](https://github.com/NVIDIA/DeepLearningExamples/blob/41f582bd9f65f6ebede77532b7cd64f038a8a380/PyTorch/Classification/ConvNets/image_classification/dataloaders.py#L354)
 
 #### Using NVIDIA DALI
-While we were able to get more performance out of the PyTorch native DataLoader, there are several overheads we cannot overcome in
+While we were able to get more performance out of the PyTorch native DataLoader, there are several potential overheads we cannot overcome in
 PyTorch alone:
 1. The PyTorch DataLoader will use CPU operations for all I/O operations as well as data augmentations
 2. The PyTorch DataLoader uses multi-processing to spawn data workers, which has performance overheads compared to true threads
@@ -228,10 +228,10 @@ and zoomed in to a single iteration:
 ![NSYS DALI Zoomed](tutorial_images/nsys_dali_zoomed.png)
 
 With DALI, you will see that there are now multiple CUDA stream rows in the timeline view, corresponding to internal streams DALI uses
-to run data augmentation kernels and any memory movement concurrently with the existing PyTorch compute kernels. Stream ??? in this view, in particular, shows concurrent H2D memory copies of the batch input data, which is an improvement over the native dataloader.
+to run data augmentation kernels and any memory movement concurrently with the existing PyTorch compute kernels. Stream 16 in this view shows concurrent H2D memory copies of the batch input data, which is an improvement over the native dataloader.
 
 ### Enabling Mixed Precision Training
-Now that the data loading performance is faster than the synthetic compute throughput, we can start looking at improving compute performance. As a first step to improve the compute performance of this training script, we can enable automatic mixed precision (AMP) in PyTorch. AMP provides a simple way for users to convert existing FP32 training scripts to mixed FP32/FP16 of FP32/BF16 precision, unlocking
+Now that the data loading performance has been improved, we can start focusing on pushing compute performance. As a first step to improve the compute performance of this training script, we can enable automatic mixed precision (AMP) in PyTorch. AMP provides a simple way for users to convert existing FP32 training scripts to mixed FP32/FP16 of FP32/BF16 precision, unlocking
 faster computation with Tensor Cores on NVIDIA GPUs.
 
 The AMP module in torch is composed of two main parts: `torch.cuda.amp.GradScaler` and `torch.cuda.amp.autocast`. `torch.cuda.amp.GradScaler` handles automatic loss scaling to control the range of FP16 gradients when using FP16 precision. Note that since BF16 precision maintains the range of FP32, loss scaling is not required when using AMP with this data type.
@@ -324,7 +324,7 @@ This is the performance of the training script for the first four epochs on a 40
 2023-09-26 22:56:07,237 - root - INFO -   Total validation time: 1.470574140548706 sec
 ```
 
-For this model, we see a massive improvement when using AMP with either FP16 or BF16 precision, improving throughput to over 42 samples/s in each case. BF16 has a slight edge over FP16 due to the removal of loss scaling.
+For this model, we see a massive improvement when using AMP with either FP16 or BF16 precision, improving throughput to over 42 samples/s in each case. BF16 has a slight edge over FP16 due to the lack of loss scaling.
 
 We can run the case with AMP BF16 enabled through profiler using the instructions in the earlier section with the added `--amp_mode=bf16`
 argument and load that profile in Nsight Systems. This is what this profile ([`dali_amp_bf16.nsys-rep`](sample_nsys_profiles/dali_amp_bf16.nsys-rep)) looks like:
@@ -412,7 +412,7 @@ Running a profile ([`dali_amp_bf16_fused_jit.nsys-rep`](sample_nsys_profiles/dal
 and zoomed in to a single iteration:
 ![NSYS DALI AMP APEX JIT Zoomed](tutorial_images/nsys_dali_amp_fused_jit_zoomed.png)
 
-As the compute cost of this model is mostly dominated by large GEMMs, latency reductions via optimizer and pointwise operation fusion is less impactful, but still provides a small performance boost in this case.
+As the compute cost of this model is mostly dominated by large GEMMs, latency reductions via optimizer and pointwise operation fusion are less impactful, but they still provide a small performance boost in this case.
 
 
 ### Using CUDA Graphs (optional)
