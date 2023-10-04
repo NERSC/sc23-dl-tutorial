@@ -3,7 +3,7 @@ base: &base
   # Model config
   embed_dim: 384
   depth: 12
-  dropout: 0
+  dropout: 0.0
   patch_size: 8
 
   # Training config
@@ -12,7 +12,7 @@ base: &base
   global_batch_size: 16 # number of samples per training batch
   num_epochs: 25
   amp_mode: none
-  enable_apex: False
+  enable_fused: False
   enable_jit: False
   expdir: '/logs'
   lr_schedule: 'cosine'
@@ -30,22 +30,19 @@ base: &base
   time_means_path:   '/data/stats/time_means.npy'
   global_means_path: '/data/stats/global_means.npy'
   global_stds_path:  '/data/stats/global_stds.npy'
-
-short_noopt:
-  <<: *base
-  num_epochs: 10
-  num_data_workers: 0
-  global_batch_size: 16
+  limit_nsamples: None
+  limit_nsamples_val: None
 
 short: &short
   <<: *base
-  num_epochs: 10
-  num_data_workers: 8
-  global_batch_size: 16
+  limit_nsamples: 512
+  limit_nsamples_val: 128
+  num_epochs: 4
 
 # Short config with full optimizations
 short_opt:
   <<: *short
   data_loader_config: 'dali'
   num_data_workers: 8
+  amp_mode: fp16
 
