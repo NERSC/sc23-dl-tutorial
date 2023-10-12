@@ -22,8 +22,6 @@ from utils.metrics import weighted_rmse
 from utils.plots import generate_images
 from networks import vit
 
-import apex.optimizers as aoptim
-
 def compute_grad_norm(p_list, device):
     norm_type = 2.0
     grads = [p.grad for p in p_list if p.grad is not None]
@@ -49,6 +47,9 @@ def train(params, args, local_rank, world_rank, world_size):
 
     # create model
     model = vit.ViT(params).to(device)
+
+    if params.enable_jit:
+        model = torch.compile(model)
     
     if params.amp_dtype == torch.float16: 
         scaler = GradScaler()
@@ -62,17 +63,10 @@ def train(params, args, local_rank, world_rank, world_size):
             model = DistributedDataParallel(model, device_ids=[local_rank],
                                             bucket_cap_mb=args.bucket_cap_mb)
 
-    if params.optimizer == 'lamb':
-        optimizer = aoptim.FusedLAMB(model.parameters(), lr = params.lr, max_grad_norm=5., weight_decay=0.)
-    elif params.optimizer == 'Adam_b2=0.95':
-        optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
-                                        adam_w_mode=False, set_grad_none=True, betas=(0.9, 0.95))
+    if params.enable_fused:
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
     else:
-        if params.enable_apex:
-            optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
-                                        adam_w_mode=False, set_grad_none=True)
-        else:
-            optimizer = optim.Adam(model.parameters(), lr = params.lr)
+        optimizer = optim.Adam(model.parameters(), lr = params.lr,  betas=(0.9, 0.95))
 
     iters = 0
     startEpoch = 0
@@ -85,10 +79,6 @@ def train(params, args, local_rank, world_rank, world_size):
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_iters)
     else:
         scheduler = None
-
-    if params.enable_jit:
-        model_handle = model.module if (params.distributed and not args.noddp) else model
-        model_handle = torch.jit.script(model_handle)  
 
     # select loss function
     if params.enable_jit:
@@ -133,48 +123,48 @@ def train(params, args, local_rank, world_rank, world_size):
         model.train()
         step_count = 0
         for i, data in enumerate(train_data_loader, 0):
-            if (args.enable_manual_profiling and world_rank==0):
+            if world_rank == 0:
                 if (epoch == 3 and i == 0):
                     torch.cuda.profiler.start()
-                if (epoch == 3 and i == 59):
+                if (epoch == 3 and i == len(train_data_loader) - 1):
                     torch.cuda.profiler.stop()
 
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"step {i}")
+            torch.cuda.nvtx.range_push(f"step {i}")
             iters += 1
             dat_start = time.time()
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"data copy in {i}")
+            torch.cuda.nvtx.range_push(f"data copy in {i}")
 
             inp, tar = map(lambda x: x.to(device), data)
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # copy in
+            torch.cuda.nvtx.range_pop() # copy in
 
             tr_start = time.time()
             b_size = inp.size(0)
             
             optimizer.zero_grad()
 
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"forward")
+            torch.cuda.nvtx.range_push(f"forward")
             with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
                 gen = model(inp)
                 loss = loss_func(gen, tar)
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() #forward
+            torch.cuda.nvtx.range_pop() #forward
 
             if params.amp_dtype == torch.float16: 
                 scaler.scale(loss).backward()
-                if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"optimizer")
+                torch.cuda.nvtx.range_push(f"optimizer")
                 scaler.step(optimizer)
-                if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
+                torch.cuda.nvtx.range_pop() # optimizer
                 scaler.update()
             else:
                 loss.backward()
-                if args.enable_manual_profiling: torch.cuda.nvtx.range_push(f"optimizer")
+                torch.cuda.nvtx.range_push(f"optimizer")
                 optimizer.step()
-                if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
+                torch.cuda.nvtx.range_pop() # optimizer
 
             if params.distributed:
                 torch.distributed.all_reduce(loss)
             tr_loss.append(loss.item()/world_size)
 
-            if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # step
+            torch.cuda.nvtx.range_pop() # step
 
 #            g_norm = compute_grad_norm(model.parameters(), device)
 #            p_norm = compute_parameter_norm(model.parameters(), device)
@@ -237,12 +227,12 @@ if __name__ == '__main__':
     parser.add_argument("--yaml_config", default='./config/ViT.yaml', type=str, help='path to yaml file containing training configs')
     parser.add_argument("--config", default='base', type=str, help='name of desired config in yaml file')
     parser.add_argument("--amp_mode", default='none', type=str, choices=['none', 'fp16', 'bf16'], help='select automatic mixed precision mode')  
-    parser.add_argument("--enable_apex", action='store_true', help='enable apex fused Adam optimizer')
+    parser.add_argument("--enable_fused", action='store_true', help='enable fused Adam optimizer')
     parser.add_argument("--enable_jit", action='store_true', help='enable JIT compilation')
-    parser.add_argument("--enable_manual_profiling", action='store_true', help='enable manual nvtx ranges and profiler start/stop calls')
     parser.add_argument("--local_batch_size", default=None, type=int, help='local batchsize (manually override global_batch_size config setting)')
     parser.add_argument("--num_iters", default=None, type=int, help='number of iters to run')
     parser.add_argument("--num_data_workers", default=None, type=int, help='number of data workers for data loader')
+    parser.add_argument("--data_loader_config", default=None, type=str, choices=['pytorch', 'dali'], help="dataloader configuration. choices: 'pytorch', 'dali'")
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
@@ -263,9 +253,12 @@ if __name__ == '__main__':
         amp_dtype = torch.bfloat16    
     params.update({"amp_enabled": amp_dtype is not torch.float32,
                     "amp_dtype" : amp_dtype, 
-                    "enable_apex" : args.enable_apex,
+                    "enable_fused" : args.enable_fused,
                     "enable_jit" : args.enable_jit
                     })
+
+    if args.data_loader_config:
+        params.update({"data_loader_config" : args.data_loader_config})
     
     if args.num_iters:
         params.update({"num_iters" : args.num_iters})
