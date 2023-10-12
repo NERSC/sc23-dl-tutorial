@@ -1,6 +1,5 @@
 #!/bin/bash 
 #SBATCH -C gpu 
-#SBATCH --nodes=1
 #SBATCH -q regular
 #SBATCH -A nstaff
 #SBATCH --ntasks-per-node 4

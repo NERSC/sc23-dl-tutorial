@@ -62,21 +62,27 @@ def train(params, args, local_rank, world_rank, world_size):
             model = DistributedDataParallel(model, device_ids=[local_rank],
                                             bucket_cap_mb=args.bucket_cap_mb)
 
-    if params.enable_apex:
-        optimizer = optim.FusedAdam(model.parameters(), lr = params.lr,
-                                    adam_w_mode=False, set_grad_none=True)
+    if params.optimizer == 'lamb':
+        optimizer = aoptim.FusedLAMB(model.parameters(), lr = params.lr, max_grad_norm=5., weight_decay=0.)
+    elif params.optimizer == 'Adam_b2=0.95':
+        optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
+                                        adam_w_mode=False, set_grad_none=True, betas=(0.9, 0.95))
     else:
-        optimizer = optim.Adam(model.parameters(), lr = params.lr)
+        if params.enable_apex:
+            optimizer = aoptim.FusedAdam(model.parameters(), lr = params.lr,
+                                        adam_w_mode=False, set_grad_none=True)
+        else:
+            optimizer = optim.Adam(model.parameters(), lr = params.lr)
 
     iters = 0
     startEpoch = 0
 
     if params.lr_schedule == 'cosine':
         if params.warmup > 0:
-            lr_scale = lambda x: min(params.lr*((x+1)/params.warmup), 0.5*params.lr*(1 + np.cos(np.pi*x/params.num_epochs)))
+            lr_scale = lambda x: min((x+1)/params.warmup, 0.5*(1 + np.cos(np.pi*x/params.num_iters)))
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_scale)
         else:
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_epochs, last_epoch=startEpoch-1)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_iters)
     else:
         scheduler = None
 
@@ -111,6 +117,7 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
 
+    params.num_epochs = params.num_iters//len(train_data_loader)
     iters = 0
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
@@ -172,13 +179,12 @@ def train(params, args, local_rank, world_rank, world_size):
 #            g_norm = compute_grad_norm(model.parameters(), device)
 #            p_norm = compute_parameter_norm(model.parameters(), device)
 
+            scheduler.step()
             tr_end = time.time()
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
 
-        # lr step
-        scheduler.step()
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
 
@@ -235,7 +241,7 @@ if __name__ == '__main__':
     parser.add_argument("--enable_jit", action='store_true', help='enable JIT compilation')
     parser.add_argument("--enable_manual_profiling", action='store_true', help='enable manual nvtx ranges and profiler start/stop calls')
     parser.add_argument("--local_batch_size", default=None, type=int, help='local batchsize (manually override global_batch_size config setting)')
-    parser.add_argument("--num_epochs", default=None, type=int, help='number of epochs to run')
+    parser.add_argument("--num_iters", default=None, type=int, help='number of iters to run')
     parser.add_argument("--num_data_workers", default=None, type=int, help='number of data workers for data loader')
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
@@ -261,8 +267,8 @@ if __name__ == '__main__':
                     "enable_jit" : args.enable_jit
                     })
     
-    if args.num_epochs:
-        params.update({"num_epochs" : args.num_epochs})
+    if args.num_iters:
+        params.update({"num_iters" : args.num_iters})
 
     if args.num_data_workers:
         params.update({"num_data_workers" : args.num_data_workers})

@@ -5,12 +5,13 @@ base: &base
   depth: 12
   dropout: 0
   patch_size: 8
+  num_heads: 8
 
   # Training config
   img_size: [360, 720]
   dt: 1 
   global_batch_size: 16 # number of samples per training batch
-  num_epochs: 25
+  num_iters: 60000
   amp_mode: none
   enable_apex: False
   enable_jit: False
@@ -18,6 +19,7 @@ base: &base
   lr_schedule: 'cosine'
   lr: 5E-4
   warmup: 0
+  optimizer: 'Adam'
 
   # Data
   data_loader_config: 'pytorch'
@@ -33,19 +35,75 @@ base: &base
 
 short_noopt:
   <<: *base
-  num_epochs: 10
   num_data_workers: 0
   global_batch_size: 16
 
 short: &short
   <<: *base
-  num_epochs: 10
   num_data_workers: 8
   global_batch_size: 16
 
-# Short config with full optimizations
-short_opt:
+short_opt: &opt
   <<: *short
   data_loader_config: 'dali'
   num_data_workers: 8
+  num_iters: 30000
+
+
+## BETA_2 -------------------------------------------------------
+
+bs16_opt_b95_40k:
+  <<: *opt
+  global_batch_size: 16
+  lr: 5e-4
+  optimizer: 'Adam_b2=0.95'
+  num_iters: 40000
+
+bs16_opt_b95:
+  <<: *opt
+  global_batch_size: 16
+  lr: 5e-4
+  optimizer: 'Adam_b2=0.95'
+
+bs32_opt_b95:
+  <<: *opt
+  global_batch_size: 32
+  lr: 7.07e-4
+  optimizer: 'Adam_b2=0.95'
+
+bs64_opt_b95:
+  <<: *opt
+  global_batch_size: 64
+  lr: 1e-3
+  optimizer: 'Adam_b2=0.95'
+
+bs128_opt_b95:
+  <<: *opt
+  global_batch_size: 128
+  lr: 1.41e-3
+  optimizer: 'Adam_b2=0.95'
+
+bs256_opt_b95:
+  <<: *opt
+  global_batch_size: 256
+  lr: 2e-3
+  optimizer: 'Adam_b2=0.95'
+
+bs512_opt_b95:
+  <<: *opt
+  global_batch_size: 512
+  lr: 2.83e-3
+  optimizer: 'Adam_b2=0.95'
+
+bs1024_opt_b95:
+  <<: *opt
+  global_batch_size: 1024
+  lr: 4e-3
+  optimizer: 'Adam_b2=0.95'
+
+bs2048_opt_b95:
+  <<: *opt
+  global_batch_size: 2048
+  lr: 5.66e-3
+  optimizer: 'Adam_b2=0.95'
 
