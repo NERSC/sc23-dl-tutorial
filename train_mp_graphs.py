@@ -386,7 +386,7 @@ if __name__ == '__main__':
 
     # Set up directory
     baseDir = params.expdir
-    expDir = os.path.join(baseDir, args.config + '/%dGPU/'%(world_size) + str(run_num) + '/')
+    expDir = os.path.join(baseDir, args.config + '/%dMP/'%(comm.get_size("model")) + str(run_num) + '/')
     if world_rank==0:
         if not os.path.isdir(expDir):
             os.makedirs(expDir)
