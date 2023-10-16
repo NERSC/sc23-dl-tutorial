@@ -39,70 +39,62 @@ short: &short
   <<: *base
   limit_nsamples: 512
   limit_nsamples_val: 128
-  num_epochs: 4
+  num_iters: 128
 
-short_opt: &opt
+short_opt:
   <<: *short
   data_loader_config: 'dali'
   num_data_workers: 8
-  amp_mode: fp16
+  amp_mode: bf16
+
+opt: &opt
+  <<: *base
+  data_loader_config: 'dali'
+  num_data_workers: 8
+  amp_mode: bf16
   num_iters: 30000
 
 
-## BETA_2 -------------------------------------------------------
+# ----- Data parallel scaling configs
 
-bs16_opt_b95_40k:
+
+bs16_opt:
   <<: *opt
   global_batch_size: 16
   lr: 5e-4
-  optimizer: 'Adam_b2=0.95'
-  num_iters: 40000
 
-bs16_opt_b95:
-  <<: *opt
-  global_batch_size: 16
-  lr: 5e-4
-  optimizer: 'Adam_b2=0.95'
-
-bs32_opt_b95:
+bs32_opt:
   <<: *opt
   global_batch_size: 32
   lr: 7.07e-4
-  optimizer: 'Adam_b2=0.95'
 
-bs64_opt_b95:
+bs64_opt:
   <<: *opt
   global_batch_size: 64
   lr: 1e-3
-  optimizer: 'Adam_b2=0.95'
 
-bs128_opt_b95:
+bs128_opt:
   <<: *opt
   global_batch_size: 128
   lr: 1.41e-3
-  optimizer: 'Adam_b2=0.95'
 
-bs256_opt_b95:
+bs256_opt:
   <<: *opt
   global_batch_size: 256
   lr: 2e-3
-  optimizer: 'Adam_b2=0.95'
 
-bs512_opt_b95:
+bs512_opt:
   <<: *opt
   global_batch_size: 512
   lr: 2.83e-3
-  optimizer: 'Adam_b2=0.95'
 
-bs1024_opt_b95:
+bs1024_opt:
   <<: *opt
   global_batch_size: 1024
   lr: 4e-3
-  optimizer: 'Adam_b2=0.95'
 
-bs2048_opt_b95:
+bs2048_opt:
   <<: *opt
   global_batch_size: 2048
   lr: 5.66e-3
-  optimizer: 'Adam_b2=0.95'
 
