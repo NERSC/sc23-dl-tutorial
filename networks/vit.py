@@ -181,11 +181,12 @@ def ViT(params, **kwargs):
                    img_size=params.img_size,
                    in_chans=params.n_in_channels, out_chans=params.n_out_channels,
                    patch_size=params.patch_size, 
-                   embed_dim=params.embed_dim, depth=params.depth, num_heads=8, mlp_ratio=4,
+                   embed_dim=params.embed_dim, depth=params.depth, mlp_ratio=4,
                    qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),
                    drop_path_rate=params.dropout,
                    drop_rate=params.dropout,
                    attn_drop_rate=params.dropout,
+                   num_heads=params.num_heads,
                    **kwargs)
     return model
 
