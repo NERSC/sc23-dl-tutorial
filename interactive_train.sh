@@ -9,14 +9,12 @@ mkdir -p ${LOGDIR}
 
 ngpu=4
 config_file=./config/ViT.yaml
-config="short_opt"
-run_num="testgraphs"
-amp_mode="fp16"
+config="short_mp"
+run_num="0"
 col_parallel_size=1
-row_parallel_size=2
-local_batch_size=16
+row_parallel_size=1
 #cmd="python train.py --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num --local_batch_size=$local_batch_size"
-cmd="python train_mp_graphs.py --local_batch_size=$local_batch_size --row_parallel_size=$row_parallel_size --col_parallel_size=$col_parallel_size --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
+cmd="python train_mp.py --row_parallel_size=$row_parallel_size --col_parallel_size=$col_parallel_size --yaml_config=$config_file --config=$config --run_num=$run_num"
 
 
 srun -n $ngpu --cpus-per-task=32 --gpus-per-node $ngpu shifter --image=${image} --module=gpu,nccl-2.18 -V ${DATADIR}:/data -V ${LOGDIR}:/logs  bash -c "source export_DDP_vars.sh && $cmd"

@@ -13,7 +13,8 @@ class HDF5ES(object):
                 n_in_channels, n_out_channels, 
                 num_shards,
                 shard_id,
-                enable_logging = True,
+                limit_nsamples,
+                enable_logging=True,
                 seed=333):
         self.batch_size = batch_size
         self.location = location
@@ -25,6 +26,7 @@ class HDF5ES(object):
         self.rng = np.random.default_rng(seed = seed)
         self.num_shards = num_shards
         self.shard_id = shard_id
+        self.limit_nsamples = limit_nsamples
         
         self._get_files_stats(enable_logging)
         self.shuffle = True if train else False
@@ -43,6 +45,9 @@ class HDF5ES(object):
             assert(self.img_shape_x <= _f['fields'].shape[2] and self.img_shape_y <= _f['fields'].shape[3]), 'image shapes are greater than dataset image shapes'
 
         self.n_samples_total = self.n_years * self.n_samples_per_year
+        if self.limit_nsamples is not None:
+            self.n_samples_total = min(self.n_samples_total, self.limit_nsamples)
+            logging.info("Overriding total number of samples to: {}".format(self.n_samples_total))
         self.n_samples_shard = self.n_samples_total // self.num_shards
         self.files = [None for _ in range(self.n_years)]
         self.dsets = [None for _ in range(self.n_years)]

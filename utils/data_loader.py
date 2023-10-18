@@ -30,7 +30,7 @@ def get_data_loader(params, files_pattern, distributed, train):
                             batch_size=int(params.local_batch_size),
                             num_workers=params.num_data_workers,
                             shuffle=(sampler is None),
-                            sampler=sampler if train else None,
+                            sampler=sampler,
                             worker_init_fn=worker_init,
                             drop_last=True,
 #                            persistent_workers=train,
@@ -52,6 +52,7 @@ class GetDataset(Dataset):
         self.normalize = True
         self.means = np.load(params.global_means_path)[0]
         self.stds = np.load(params.global_stds_path)[0]
+        self.limit_nsamples = params.limit_nsamples if train else params.limit_nsamples_val
         self._get_files_stats()
 
     def _get_files_stats(self):
@@ -68,6 +69,9 @@ class GetDataset(Dataset):
             assert(self.img_shape_x <= _f['fields'].shape[2] and self.img_shape_y <= _f['fields'].shape[3]), 'image shapes are greater than dataset image shapes'
 
         self.n_samples_total = self.n_years * self.n_samples_per_year
+        if self.limit_nsamples is not None:
+            self.n_samples_total = min(self.n_samples_total, self.limit_nsamples)
+            logging.info("Overriding total number of samples to: {}".format(self.n_samples_total))
         self.files = [None for _ in range(self.n_years)]
         logging.info("Number of samples per year: {}".format(self.n_samples_per_year))
         logging.info("Found data at path {}. Number of examples: {}. Image Shape: {} x {} x {}".format(self.location, self.n_samples_total, self.img_shape_x, self.img_shape_y, self.n_in_channels))

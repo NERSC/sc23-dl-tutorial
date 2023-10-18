@@ -1,15 +1,12 @@
 #!/bin/bash 
-#SBATCH -C gpu 
-#SBATCH --nodes=1
-#SBATCH -q regular
-#SBATCH -A nstaff
+#SBATCH -C 'gpu&hbm80g'
 #SBATCH --ntasks-per-node 4
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-node 4
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 #SBATCH --image=nersc/pytorch:ngc-23.04-v0
 #SBATCH --module=gpu,nccl-2.18
-#SBATCH -J vit-era5
+#SBATCH -J vit-era5-dp-ng
 #SBATCH -o %x-%j.out
 
 DATADIR=/pscratch/sd/s/shas1693/data/sc23_tutorial_data/downsampled
@@ -17,18 +14,14 @@ LOGDIR=${SCRATCH}/sc23-dl-tutorial/logs
 mkdir -p ${LOGDIR}
 
 config_file=./config/ViT.yaml
-config="short_opt"
-run_num="bs16_graphs"
-suffix="_graphs"
-#suffix=""
-amp_mode="fp16"
+config="mp"
+run_num="bs64"
+suffix=""
 col_parallel_size=1
-row_parallel_size=4
-args="--col_parallel_size=$col_parallel_size --row_parallel_size=$row_parallel_size --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num"
-
+row_parallel_size=1
+args="--col_parallel_size=$col_parallel_size --row_parallel_size=$row_parallel_size --yaml_config=$config_file --config=$config --run_num=$run_num"
 
 export FI_MR_CACHE_MONITOR=userfaultfd
-export NCCL_NET_GDR_LEVEL=PHB
 export HDF5_USE_FILE_LOCKING=FALSE
 
 # Profiling
