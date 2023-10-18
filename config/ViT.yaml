@@ -51,8 +51,10 @@ opt: &opt
   <<: *base
   data_loader_config: 'dali'
   num_data_workers: 8
-  amp_mode: bf16
+  amp_mode: fp16
   num_iters: 30000
+  enable_fused: True
+  enable_apex: True
 
 
 # ----- Data parallel scaling configs
