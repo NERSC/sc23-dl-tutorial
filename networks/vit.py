@@ -219,6 +219,7 @@ def ViT(params, **kwargs):
                    drop_path_rate=params.dropout,
                    drop_rate=params.dropout,
                    attn_drop_rate=params.dropout,
+                   num_heads=params.num_heads,
                    **kwargs)
     return model
 
