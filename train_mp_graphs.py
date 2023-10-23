@@ -126,9 +126,9 @@ def train(params, args, local_rank, world_rank, world_size):
         print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
             
     if params.enable_fused:
-        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True)
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
     else:
-        optimizer = optim.Adam(model.parameters(), lr = params.lr)
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, betas=(0.9, 0.95))
 
     iters = 0
     startEpoch = 0

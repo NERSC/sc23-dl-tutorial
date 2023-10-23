@@ -9,10 +9,10 @@ mkdir -p ${LOGDIR}
 
 ngpu=4
 config_file=./config/ViT.yaml
-config="short_mp"
-run_num="0"
+config="mp"
+run_num="test"
 col_parallel_size=1
-row_parallel_size=1
+row_parallel_size=4
 #cmd="python train.py --amp_mode=$amp_mode --yaml_config=$config_file --config=$config --run_num=$run_num --local_batch_size=$local_batch_size"
 cmd="python train_mp.py --row_parallel_size=$row_parallel_size --col_parallel_size=$col_parallel_size --yaml_config=$config_file --config=$config --run_num=$run_num"
 

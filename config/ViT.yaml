@@ -108,7 +108,7 @@ bs2048_opt:
 
 # Model parallel configs
 short_mp: &short_mp
-  <<: *base
+  <<: *short_ls
   global_batch_size: 16
   data_loader_config: 'dali'
   num_data_workers: 8
@@ -118,10 +118,12 @@ short_mp: &short_mp
   enable_fused: true
 
 mp:
-  <<: *short_mp
+  <<: *base
   num_iters: 30000
   global_batch_size: 64
   lr: 1e-3
+  num_data_workers: 8
+  embed_dim: 1024 # change to bigger model
   data_loader_config: 'dali'
   amp_mode: fp16
   enable_jit: true
