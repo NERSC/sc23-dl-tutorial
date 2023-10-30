@@ -194,7 +194,6 @@ class VisionTransformer(nn.Module):
 
         # apply head
         x = self.head(x)
-        # replace with pixel shuffle?
         x = x.reshape(shape=(B, h, w, self.patch_size, self.patch_size, self.out_ch))
         x = torch.einsum("nhwpqc->nchpwq", x)
         x = x.reshape(shape=(B, self.out_ch, self.img_size[0], self.img_size[1]))

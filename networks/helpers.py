@@ -5,6 +5,9 @@ import torch.nn as nn
 import torch
 import warnings
 
+# These functions are directly pulled from timm: 
+# https://github.com/huggingface/pytorch-image-models/tree/main/timm
+
 @torch.jit.script
 def drop_path(x: torch.Tensor, drop_prob: float = 0., training: bool = False) -> torch.Tensor:
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
