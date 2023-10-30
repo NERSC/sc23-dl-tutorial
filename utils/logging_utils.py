@@ -30,3 +30,26 @@ def log_versions():
   logging.info('git hash: ' + str(subprocess.check_output(['git', 'rev-parse', 'HEAD']).strip()))
   logging.info('Torch: ' + str(torch.__version__))
   logging.info('----------------------------------------')
+
+class disable_logging(object):
+    """
+    A context manager to disable logging temporarily.
+    """
+
+    def __init__(self, level=logging.ERROR):  # pragma: no cover
+        """
+        Initialize the context manager.
+        """
+        logging.disable(level=level)
+
+    def __enter__(self):  # pragma: no cover
+        """
+        Enter the context manager.
+        """
+        return self
+
+    def __exit__(self, type, value, traceback):  # pragma: no cover
+        """
+        Exit the context manager and enable logging.
+        """
+        logging.disable(level=logging.NOTSET)

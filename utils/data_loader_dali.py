@@ -9,6 +9,7 @@ import concurrent.futures as cf
 
 # distributed stuff
 import torch.distributed as dist
+from utils import comm
 
 #dali stuff
 from nvidia.dali.pipeline import Pipeline
@@ -34,7 +35,7 @@ class DaliDataLoader(object):
                             device_id = self.device_index,
                             py_num_workers = self.num_data_workers,
                             py_start_method='spawn',
-                            seed = self.global_seed)
+                            seed = self.model_seed)
         
      
         with pipeline: # get input and target 
@@ -50,7 +51,7 @@ class DaliDataLoader(object):
                                                               self.shard_id,
                                                               self.limit_nsamples,
                                                               enable_logging = False,
-                                                              seed=333),
+                                                              seed=self.global_seed),
                                           num_outputs = 2,
                                           layout = ["CHW", "CHW"],
                                           batch = False,
@@ -80,7 +81,15 @@ class DaliDataLoader(object):
         return pipeline
 
     def __init__(self, params, location, train, seed = 333):
+        # set up seeds
+        # this one is the same on all ranks
         self.global_seed = seed
+        # this one is the same for all ranks of the same model
+        model_id = comm.get_world_rank() // comm.get_size("model")
+        self.model_seed = self.global_seed + model_id
+        # this seed is supposed to be diffferent for every rank
+        self.local_seed = self.global_seed + comm.get_world_rank()
+
         self.num_data_workers = params.num_data_workers
         self.device_index = torch.cuda.current_device()
         self.batch_size = int(params.local_batch_size)
@@ -106,8 +115,8 @@ class DaliDataLoader(object):
 
         # set sharding
         if dist.is_initialized():
-            self.num_shards = dist.get_world_size()
-            self.shard_id = dist.get_rank()
+            self.num_shards = params.data_num_shards
+            self.shard_id = params.data_shard_id
         else:
             self.num_shards = 1
             self.shard_id = 0
@@ -123,7 +132,7 @@ class DaliDataLoader(object):
                                self.num_shards,
                                self.shard_id,
                                self.limit_nsamples,
-                               seed=333)
+                               seed=self.global_seed)
         self.num_batches = extsource.num_steps_per_epoch
         del extsource
  

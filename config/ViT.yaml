@@ -13,8 +13,8 @@ base: &base
   global_batch_size: 16 # number of samples per training batch
   num_iters: 60000
   amp_mode: none
-  enable_fused: False
-  enable_jit: False
+  enable_fused: false
+  enable_jit: false
   expdir: '/logs'
   lr_schedule: 'cosine'
   lr: 5E-4
@@ -35,18 +35,27 @@ base: &base
   limit_nsamples: None
   limit_nsamples_val: None
 
-short: &short
+  # Comms
+  wireup_info: env
+  wireup_store: tcp
+
+# limit the number of samples
+short_limitsamples: &short_ls
   <<: *base
   limit_nsamples: 512
   limit_nsamples_val: 128
   num_iters: 128
 
+# add optimization flags
 short_opt:
-  <<: *short
+  <<: *short_ls
   data_loader_config: 'dali'
   num_data_workers: 8
-  amp_mode: bf16
+  amp_mode: fp16
+  enable_jit: true
+  enable_fused: true
 
+# no samples limits
 opt: &opt
   <<: *base
   data_loader_config: 'dali'
@@ -56,10 +65,7 @@ opt: &opt
   enable_fused: True
   enable_apex: True
 
-
 # ----- Data parallel scaling configs
-
-
 bs16_opt:
   <<: *opt
   global_batch_size: 16
@@ -100,3 +106,25 @@ bs2048_opt:
   global_batch_size: 2048
   lr: 5.66e-3
 
+# Model parallel configs
+short_mp: &short_mp
+  <<: *short_ls
+  global_batch_size: 16
+  data_loader_config: 'dali'
+  num_data_workers: 8
+  embed_dim: 1024 # change to bigger model
+  amp_mode: fp16
+  enable_jit: true
+  enable_fused: true
+
+mp:
+  <<: *base
+  num_iters: 30000
+  global_batch_size: 64
+  lr: 1e-3
+  num_data_workers: 8
+  embed_dim: 1024 # change to bigger model
+  data_loader_config: 'dali'
+  amp_mode: fp16
+  enable_jit: true
+  enable_fused: true

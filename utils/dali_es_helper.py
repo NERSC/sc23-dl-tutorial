@@ -14,7 +14,7 @@ class HDF5ES(object):
                 num_shards,
                 shard_id,
                 limit_nsamples,
-                enable_logging = True,
+                enable_logging=True,
                 seed=333):
         self.batch_size = batch_size
         self.location = location

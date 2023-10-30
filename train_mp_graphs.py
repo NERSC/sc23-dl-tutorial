@@ -1,8 +1,10 @@
 import sys
 import os
 import time
+import gc
 import numpy as np
 import argparse
+import pynvml
 
 import torch
 import torch.nn as nn
@@ -11,22 +13,82 @@ from torch.cuda.amp import autocast, GradScaler
 import torch.multiprocessing
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
+from torch.distributed import ReduceOp
 
 import logging
 from utils import logging_utils
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils import get_data_loader_distributed
+from utils import comm
 from utils.loss import l2_loss, l2_loss_opt
 from utils.metrics import weighted_rmse
-from utils.plots import generate_images
 from networks import vit
+
+from distributed.mappings import init_ddp_model_and_reduction_hooks
+from distributed.helpers import sync_params
+
+from utils.plots import generate_images
+
+
+def capture_model(params, model, loss_func, scaler, capture_stream, device, num_warmup=20):
+    print("Capturing Model")
+    inp_shape = (params.local_batch_size, params.n_in_channels, params.img_size[0], params.img_size[1])
+    tar_shape = (params.local_batch_size, params.n_in_channels, params.img_size[0], params.img_size[1])
+    
+    # no zeros because loss is rel loss
+    static_input = torch.randn(inp_shape, dtype=torch.float32, device=device)
+    static_label = torch.randn(tar_shape, dtype=torch.float32, device=device)
+
+    capture_stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(capture_stream):
+        for _ in range(num_warmup):
+            model.zero_grad(set_to_none=True)
+            with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
+                static_output = model(static_input).to(device)
+                static_loss = loss_func(static_output, static_label)
+
+            if params.amp_dtype == torch.float16:
+                scaler.scale(static_loss).backward()
+            else:
+                static_loss.backward()
+
+        # sync here
+        capture_stream.synchronize()
+        
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        # create graph
+        graph = torch.cuda.CUDAGraph()
+
+        # zero grads before capture:
+        model.zero_grad(set_to_none=True)
+
+        # do the capture with the context manager:
+        with torch.cuda.graph(graph):
+            with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype): 
+                static_output = model(static_input).to(device)
+                static_loss = loss_func(static_output, static_label)
+
+            if params.amp_dtype == torch.float16:
+                scaler.scale(static_loss).backward()
+            else:
+                static_loss.backward()
+
+    torch.cuda.current_stream().wait_stream(capture_stream)
+
+    return graph, static_input, static_output, static_label, static_loss
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
     torch.backends.cudnn.benchmark = True
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
+
+    # init pynvml and get handle
+    pynvml.nvmlInit()
+    nvml_handle = pynvml.nvmlDeviceGetHandleByIndex(device.index)
 
     # get data loader
     logging.info('rank %d, begin data loader init'%world_rank)
@@ -42,23 +104,31 @@ def train(params, args, local_rank, world_rank, world_size):
     
     if params.amp_dtype == torch.float16: 
         scaler = GradScaler()
-    if params.distributed and not args.noddp:
-        if args.disable_broadcast_buffers: 
-            model = DistributedDataParallel(model, device_ids=[local_rank],
-                                            bucket_cap_mb=args.bucket_cap_mb,
-                                            broadcast_buffers=False,
-                                            gradient_as_bucket_view=True)
-        else:
-            model = DistributedDataParallel(model, device_ids=[local_rank],
-                                            bucket_cap_mb=args.bucket_cap_mb)
-
-    if params.enable_fused:
-        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
     else:
-        optimizer = optim.Adam(model.parameters(), lr = params.lr,  betas=(0.9, 0.95))
+        scaler = None
+
+    # weight initialization needs to be synced across shared weights
+    if comm.get_size("model") > 1:
+        sync_params(model)
+
+    capture_stream = torch.cuda.Stream()
+    if params.distributed:
+        with torch.cuda.stream(capture_stream):
+            model = init_ddp_model_and_reduction_hooks(model, device_ids=[local_rank],
+                                                    output_device=[local_rank],
+                                                    bucket_cap_mb=args.bucket_cap_mb)
+    capture_stream.synchronize()
+
 
     if world_rank == 0:
         print(model)
+        all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+        print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
+            
+    if params.enable_fused:
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
+    else:
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, betas=(0.9, 0.95))
 
     iters = 0
     startEpoch = 0
@@ -78,6 +148,10 @@ def train(params, args, local_rank, world_rank, world_size):
     else:
         loss_func = l2_loss
 
+    # capture the model
+    graph, static_input, static_output, static_label, static_loss = capture_model(params, model, loss_func, scaler,
+                                                                                  capture_stream, device, num_warmup=20)
+
     if world_rank==0: 
         logging.info("Starting Training Loop...")
 
@@ -91,13 +165,13 @@ def train(params, args, local_rank, world_rank, world_size):
         val_loss = loss_func(gen, tar)
         val_rmse = weighted_rmse(gen, tar)
         if params.distributed:
-            torch.distributed.all_reduce(tr_loss)
-            torch.distributed.all_reduce(val_loss)
-            torch.distributed.all_reduce(val_rmse)
+            torch.distributed.all_reduce(tr_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
         if world_rank==0:
-            args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+            args.tboard_writer.add_scalar('Loss/train', tr_loss.item(), 0)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss.item(), 0)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], 0)
 
     params.num_epochs = params.num_iters//len(train_data_loader)
     iters = 0
@@ -114,6 +188,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
         model.train()
         step_count = 0
+
         for i, data in enumerate(train_data_loader, 0):
             if world_rank == 0:
                 if (epoch == 3 and i == 0):
@@ -132,29 +207,28 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_start = time.time()
             b_size = inp.size(0)
             
-            optimizer.zero_grad()
+            static_input.copy_(inp)
+            static_label.copy_(tar)
+            graph.replay()
 
-            torch.cuda.nvtx.range_push(f"forward")
-            with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
-                gen = model(inp)
-                loss = loss_func(gen, tar)
-            torch.cuda.nvtx.range_pop() #forward
+            if world_rank == 0 and i == 1:
+                all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
+                logging.info(f" Memory usage after forward pass: {all_mem_gb} GB.")
 
-            if params.amp_dtype == torch.float16: 
-                scaler.scale(loss).backward()
+            if params.amp_dtype == torch.float16:
                 torch.cuda.nvtx.range_push(f"optimizer")
                 scaler.step(optimizer)
                 torch.cuda.nvtx.range_pop() # optimizer
                 scaler.update()
             else:
-                loss.backward()
                 torch.cuda.nvtx.range_push(f"optimizer")
                 optimizer.step()
                 torch.cuda.nvtx.range_pop() # optimizer
 
+
             if params.distributed:
-                torch.distributed.all_reduce(loss)
-            tr_loss.append(loss.item()/world_size)
+                torch.distributed.all_reduce(static_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+            tr_loss.append(static_loss.item())
 
             torch.cuda.nvtx.range_pop() # step
             # lr step
@@ -192,10 +266,9 @@ def train(params, args, local_rank, world_rank, world_size):
                     loss = loss_func(gen, tar)
                     val_rmse += weighted_rmse(gen, tar)
                     if params.distributed:
-                        torch.distributed.all_reduce(loss)
-                        torch.distributed.all_reduce(val_rmse)
-                        val_rmse /= world_size
-                    val_loss.append(loss.item()/world_size)
+                        torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+                        torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
+                    val_loss.append(loss.item())
                 valid_steps += 1
 
         val_rmse /= valid_steps # Avg validation rmse
@@ -207,8 +280,10 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
             args.tboard_writer.flush()
 
+    torch.cuda.synchronize()
     t2 = time.time()
     tottime = t2 - t1
+    pynvml.nvmlShutdown()
 
 
 if __name__ == '__main__':
@@ -226,6 +301,11 @@ if __name__ == '__main__':
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
+
+    # model parallelism arguments
+    parser.add_argument("--row_parallel_size", default=1, type=int, help="Number of row comms")
+    parser.add_argument("--col_parallel_size", default=1, type=int, help="Number of col comms")
+
     args = parser.parse_args()
  
     run_num = args.run_num
@@ -257,35 +337,42 @@ if __name__ == '__main__':
         params.update({"num_data_workers" : args.num_data_workers})
 
     params.distributed = False
-    if 'WORLD_SIZE' in os.environ:
-        params.distributed = int(os.environ['WORLD_SIZE']) > 1
-        world_size = int(os.environ['WORLD_SIZE'])
-    else:
-        world_size = 1
 
-    world_rank = 0
-    local_rank = 0
-    if params.distributed:
-        torch.distributed.init_process_group(backend='nccl',
-                                            init_method='env://')
-        world_rank = torch.distributed.get_rank()
-        local_rank = int(os.environ['LOCAL_RANK'])
+    # setup model parallel sizes
+    params["model_parallel_sizes"] = [
+        args.row_parallel_size,
+        args.col_parallel_size
+    ]
+    params["model_parallel_names"] = ["row_matmul", "col_matmul"]
+
+    # initialize comm
+    comm.init(params, verbose=True)
+
+    # get info from comm
+    world_size = comm.get_world_size()
+    world_rank = comm.get_world_rank()
+    local_rank = comm.get_local_rank()
+    params.distributed = (world_size > 1)
+
+    assert (
+        params["global_batch_size"] % comm.get_size("data") == 0
+    ), f"Error, cannot evenly distribute {params['global_batch_size']} across {comm.get_size('data')} GPU."
 
     if args.local_batch_size:
         # Manually override batch size
         params.local_batch_size = args.local_batch_size
-        params.update({"global_batch_size" : world_size*args.local_batch_size})
+        params.update({"global_batch_size" : comm.get_size("data") * args.local_batch_size})
     else:
         # Compute local batch size based on number of ranks
-        params.local_batch_size = params.global_batch_size//world_size
+        params.local_batch_size = int(params["global_batch_size"] // comm.get_size("data"))
 
-    # for dali data loader, set the actual number of data shards and id
-    params.data_num_shards = world_size
-    params.data_shard_id = world_rank
+    # for data loader, set the actual number of data shards and id
+    params.data_num_shards = comm.get_size("data")
+    params.data_shard_id = comm.get_rank("data")
 
     # Set up directory
     baseDir = params.expdir
-    expDir = os.path.join(baseDir, args.config + '/%dGPU/'%(world_size) + str(run_num) + '/')
+    expDir = os.path.join(baseDir, args.config + '/%dMP/'%(comm.get_size("model")) + str(run_num) + '/')
     if world_rank==0:
         if not os.path.isdir(expDir):
             os.makedirs(expDir)

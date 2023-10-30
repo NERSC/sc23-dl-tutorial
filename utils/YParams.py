@@ -25,6 +25,13 @@ class YParams():
   def __setitem__(self, key, val):
     self.params[key] = val
 
+  def get(self, key, default=None):
+    """Get a parameter value"""
+    if hasattr(self, key):
+      return getattr(self, key)
+    else:
+      return self.params.get(key, default)
+
   def log(self):
     logging.info("------------------ Configuration ------------------")
     logging.info("Configuration file: "+str(self._yaml_filename))
