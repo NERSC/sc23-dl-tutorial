@@ -1,4 +1,96 @@
-# sc23-tutorial
+# SC23 Deep Learning at Scale Tutorial
+
+This repository contains the example code material for the SC23 tutorial:
+*Deep Learning at Scale*.
+
+**Contents**
+* [Links](#links)
+* [Installation](#installation-and-setup)
+* [Model, data, and code overview](#model-data-and-training-code-overview)
+* [Single GPU training](#single-gpu-training)
+* [Single GPU performance](#single-gpu-performance-profiling-and-optimization)
+* [??](#distributed-gpu-training)
+* [??](#multi-gpu-performance-profiling-and-optimization)
+* [??](#putting-it-all-together)
+
+## Links
+
+Tutorial slides: https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=sharing
+
+Join the Slack workspace: https://join.slack.com/t/nersc-dl-tutorial/shared_invite/zt-25yvx25rr-RPWN1UclFvwgnRyr39Qt0w
+
+NERSC JupyterHub: https://jupyter.nersc.gov
+
+Data download (only needed if you want to run our examples elsewhere): https://portal.nersc.gov/project/dasrepo/pharring/sc23_data
+
+## Installation and Setup
+
+### Software environment
+
+The instructions in this README are intended to be used with NERSC's Perlmutter machine.
+
+Access to the Perlmutter machine is provided for this tutorial via [jupyter.nersc.gov](https://jupyter.nersc.gov). 
+Training account setup instructions will be given during the session. Once you have your provided account credentials, you can log in to Jupyter via the link (leave the OTP field blank when logging into Jupyter).
+Once logged into the hub, start a session by clicking the button for Perlmutter Shared CPU Node (other options will not work with this tutorial material). This will open up a session on a Perlmutter login node, from which you can submit jobs to the GPU nodes and monitor their progress.
+
+To begin, start a terminal from JupyterHub and clone this repository with:
+```bash
+git clone https://github.com/NERSC/sc23-dl-tutorial.git
+```
+You can use the Jupyter file browser to view and edit source files and scripts. For all of the example commands provided below, make sure you are running them from within the top-level folder of the repository. In your terminal, change to the directory with
+```bash
+cd sc23-dl-tutorial
+```
+
+For running slurm jobs on Perlmutter, we will use training accounts which are provided under the `ntrain4` project. The slurm script `submit_pm.sh` included in the repository is configured to work automatically as is, but if you submit your own custom jobs via `salloc` or `sbatch` you must include the following flags for slurm:
+* `-A ntrain4_g` is required for training accounts
+* `--reservation=<reservation_name>` is required to access the set of GPU nodes we have reserved for the duration of the tutorial. For the morning session use `<reservation_name>` set to `??`, and for the afternoon session use `<reservation_name>` set to `??` (we have two different size reservations for the single-GPU and multi-GPU sections respectively)
+
+The code can be run using the `nersc/pytorch:ngc-23.04-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA ngc 23.04 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-04.html), with a few additional packages added.
+
+### Installing Nsight Systems
+In this tutorial, we will be generating profile files using NVIDIA Nsight Systems on the remote systems. In order to open and view these
+files on your local computer, you will need to install the Nsight Systems program, which you can download [here](https://developer.nvidia.com/gameworksdownload#?search=nsight%20systems). Select the download option required for your system (e.g. Mac OS host for MacOS, Window Host for Windows, or Linux Host .rpm/.deb/.run for Linux). You may need to sign up and create a login to NVIDIA's developer program if you do not
+already have an account to access the download. Proceed to run and install the program using your selected installation method.
+
+## Model, data, and training code overview
+
+The model in this repository is adapted from modern applications of deep learning for weather forecasting, e.g. [FourCastNet](https://arxiv.org/abs/2202.11214). [GraphCast](https://arxiv.org/abs/2212.12794), [Pangu-Weather](https://arxiv.org/abs/2211.02556), and others. These models are trained on a combination of observed and simulated data describing the atmospheric state on Earth over the past several decades, and they achieve impressive performance in terms of accuracy and forecast speed when compared against traditional numerical weather prediction (NWP) models.
+
+![weather forecasting animation](tutorial_images/weather_forecasting.gif)
+
+For these examples we will be using a [vision transformer](https://arxiv.org/abs/2010.11929) (ViT) architecture, for which our implementation can be found in [`networks/vit.py`](networks/vit.py). ViTs are a widely-used architecture in computer vision, known for scaling well to large datasets and being able to model long-range dependencies easily via the use of self-attention layers. While 'vanilla' ViTs are not necessarily state-of-the-art on the weather forecasting task, they are a good model to use for educational purposes as they are widely used in a variety of applications and the techniques outlined here (e.g. channel-wise tensor parallelism) would transfer well to other applications (e.g. NLP/LLMs).
+
+![vision transformer schematic](tutorial_images/vit_schematic.png)
+
+Data-driven weather models are typically trained on the [ERA5 reanalysis dataset](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5) from the European Center for Medium-range Weather Forecasts (ECMWF). This dataset represents 40 years of atmospheric data on a 25km global grid, combining simulation outputs assimilated with observations. The basic data loading pipeline for training models is defined in [`utils/data_loader.py`](utils/data_loader.py), whose primary components are:
+* The `ERA5Dataset`, which accesses the data stored on disk and serves input-output pairs of the atmospheric variables for training and validation. Each pair is a randomly-sampled snapshots of the atmosphere, separated by a 6 hour timestep. The model is given the first snapshot as input and is trained to predict the snapshot 6 hours later.
+* For this repository, we will be using a spatially-downsampled version of the data so training runs a little faster.
+* The above dataset object is passed to a PyTorch `DataLoader` which takes the samples and combines them into a batch for each training step.
+
+It is common practice to decay the learning rate according to some schedule as the model trains, so that the optimizer can settle into sharper minima during gradient descent. Here we opt for the cosine learning rate decay schedule, which starts at an intial learning rate and decays continuously throughout training according to a cosine function. This is handled by the `LambdaLR` or `CosineAnnealingLR` utilities from PyTorch, set in [`train.py`](train.py) -- the `LambdaLR` uses custom logic to implement learning rate warm-up if desired for distributed training.
+
+As we will see in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section, we'll be able to speed up the baseline data loading pipeline significantly by making various improvements. Another option introduced in that section is to do data loading using NVIDIA's DALI library, for which the implementation can be found in [`utils/data_loader_dali.py`](utils/data_loader_dali.py).
+
+The script to train the model is [`train.py`](train.py), which uses the following arguments to load the desired training setup:
+```
+--yaml_config YAML_CONFIG   path to yaml file containing training configs
+--config CONFIG             name of desired config in yaml file
+```
+
+Based on the selected configuration, the train script will then:
+1.  Set up the data loaders and construct our ViT model, the Adam optimizer, and our L2 loss function.
+2.  Loop over training epochs to run the training. See if you can identify the following key components: 
+    * Looping over data batches from our data loader.
+    * Applying the forward pass of the model and computing the loss function.
+    * Calling `backward()` on the loss value to backpropagate gradients. Note the use of the `grad_scaler` will be explained below when enabling mixed precision.
+    * Applying the model to the validation dataset and logging training and validation metrics to visualize in TensorBoard (see if you can find where we construct the TensorBoard `SummaryWriter` and where our specific metrics are logged via the `add_scalar` call).
+
+Besides the `train.py` script, we have a slightly more complex [`train_graph.py`](train_graph.py)
+script, which implements the same functionality with added capability for using the CUDA Graphs APIs introduced in PyTorch 1.10. This topic will be covered in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section.
+
+More info on the model and data can be found in the [slides](https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=drive_link). If you are experimenting with this repository after the tutorial date, you can download the data from here: https://portal.nersc.gov/project/dasrepo/pharring/sc23_data.
+Note that you will have to adjust the data path in `submit_pm.sh` to point yor personal copy after downloading.
 
 ## Single GPU training
 

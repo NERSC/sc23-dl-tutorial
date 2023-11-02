@@ -13,7 +13,7 @@ def worker_init(wrk_id):
     np.random.seed(torch.utils.data.get_worker_info().seed%(2**32 - 1))
 
 def get_data_loader(params, files_pattern, distributed, train):
-    dataset = GetDataset(params, files_pattern, train)
+    dataset = ERA5Dataset(params, files_pattern, train)
 
     if distributed:
         if hasattr(params, 'data_num_shards'):
@@ -41,7 +41,7 @@ def get_data_loader(params, files_pattern, distributed, train):
     else:
         return dataloader, dataset
 
-class GetDataset(Dataset):
+class ERA5Dataset(Dataset):
     def __init__(self, params, location, train):
         self.params = params
         self.location = location
