@@ -40,7 +40,7 @@ base: &base
   wireup_store: tcp
 
 # limit the number of samples
-short_limitsamples: &short_ls
+short: &short_ls
   <<: *base
   limit_nsamples: 512
   limit_nsamples_val: 128
