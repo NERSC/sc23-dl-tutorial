@@ -107,15 +107,15 @@ directory. You can find the job id of your job using the command `squeue --me` a
 
 For interactive jobs, you can run the Python script directly using the following command (**NOTE: please don't run training on the Perlmutter login nodes**):
 ```
-python train.py --config=short --num_epochs 4
+python train.py --config=short
 ```
-This will run 4 epochs of training on a single GPU using a default batch size of 16.
+This will run 128 training iterations on a single GPU using a default batch size of 16.
 See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
-In the baseline configuration, the model converges to a loss of about `???` on
-the validation dataset in ??? epochs. This takes around ??? hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
+In the baseline configuration, the model converges to a loss of about `0.13` on
+the validation dataset in about 22k training iterations. This takes around 22 hours hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
 We want to compare our training results against the `base` config baseline, and TensorBoard makes this easy as long as all training runs are stored in the same place. 
 To copy the example TensorBoard log to the scratch directory where our training jobs will output their logs, do
 ```
