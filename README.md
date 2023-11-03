@@ -44,9 +44,9 @@ cd sc23-dl-tutorial
 
 For running slurm jobs on Perlmutter, we will use training accounts which are provided under the `ntrain4` project. The slurm script `submit_pm.sh` included in the repository is configured to work automatically as is, but if you submit your own custom jobs via `salloc` or `sbatch` you must include the following flags for slurm:
 * `-A ntrain4_g` is required for training accounts
-* `--reservation=<reservation_name>` is required to access the set of GPU nodes we have reserved for the duration of the tutorial. For the morning session use `<reservation_name>` set to `??`, and for the afternoon session use `<reservation_name>` set to `??` (we have two different size reservations for the single-GPU and multi-GPU sections respectively)
+* `--reservation=<reservation_name>` is required to access the set of GPU nodes we have reserved for the duration of the tutorial. For the morning session use `<reservation_name>` set to `sc23_dl_tutorial_1`, and for the afternoon session use `<reservation_name>` set to `sc23_dl_tutorial_2` (we have two different size reservations for the single-GPU and multi-GPU sections respectively)
 
-The code can be run using the `nersc/pytorch:ngc-23.04-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA ngc 23.04 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-04.html), with a few additional packages added.
+The code can be run using the `nersc/pytorch:ngc-23.07-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA ngc 23.07 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-07.html), with a few additional packages added.
 
 ### Installing Nsight Systems
 In this tutorial, we will be generating profile files using NVIDIA Nsight Systems on the remote systems. In order to open and view these
@@ -98,7 +98,7 @@ First, let us look at the performance of the training script without optimizatio
 
 On Perlmutter for the tutorial, we will be submitting jobs to the batch queue. To submit this job, use the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4
+sbatch -n 1 ./submit_pm.sh --config=short
 ```
 `submit_pm.sh` is a batch submission script that defines resources to be requested by SLURM as well as the command to run.
 Note that any arguments for `train.py`, such as the desired config (`--config`), can be added after `submit_pm.sh` when submitting, and they will be passed to `train.py` properly.
@@ -114,7 +114,7 @@ See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
-In the baseline configuration, the model converges to a loss of about `0.13` on
+While the model predicts many atmospheric variables, we will focus on In the baseline configuration, the model converges to a RMSE of about `0.13` on
 the validation dataset in about 22k training iterations. This takes around 22 hours hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
 We want to compare our training results against the `base` config baseline, and TensorBoard makes this easy as long as all training runs are stored in the same place. 
 To copy the example TensorBoard log to the scratch directory where our training jobs will output their logs, do
@@ -161,11 +161,11 @@ We can also add calls to `torch.cuda.profiler.start()` and `torch.cuda.profiler.
 
 To generate a profile using our scripts on Perlmutter, run the following command: 
 ```
-ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 submit_pm.sh --config=short --num_epochs 4
+ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 submit_pm.sh --config=short
 ```
 If running interactively, this is the full command from the batch submission script:
 ```
-nsys profile -o baseline --trace=cuda,nvtx -c cudaProfilerApi --kill none -f true python train.py --config=short --num_epochs 4
+nsys profile -o baseline --trace=cuda,nvtx -c cudaProfilerApi --kill none -f true python train.py --config=short
 ```
 This command will run four epochs of the training script, profiling only the last epoch run. It will produce a file `baseline.nsys-rep` that can be opened in the Nsight System's program. The arg `--trace=cuda,nvtx` is optional and is used here to disable OS Runtime tracing for speed. The arg `-c cudaProfilerApi` instructs the profiler to only profile the duration of the runtime between the `torch.cuda.profiler.start()` and `torch.cuda.profiler.stop()` calls.
 
@@ -189,11 +189,11 @@ line arg to our script. The default used by PyTorch is `num_workers=0`, which ru
 
 We can run this experiment on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers <value of your choice>
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers <value of your choice>
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers <value of your choice>
+python train.py --config=short --num_data_workers <value of your choice>
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and 4 data workers:
@@ -285,11 +285,11 @@ argument `--data_loader_config=dali` to the training script.
 
 We can run this experiment on Perlmutter using DALI with 8 worker threads by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and DALI:
@@ -332,7 +332,7 @@ The `torch.cuda.amp.autocast` context manager handles converting model operation
 As a quick note, the A100 GPUs we've been using to report results thus far have been able to benefit from Tensor Core compute via the use of TF32 precision operations, enabled by default for CUDNN and CUBLAS in PyTorch. We can measure the benefit of TF32 precision usage on the A100 GPU by temporarily disabling it via setting the environment variable `NVIDIA_TF32_OVERRIDE=0`.  
 We can run this experiment on Perlmutter by running the following command:
 ```
-NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 yields the following result for 4 epochs:
 ```
@@ -359,21 +359,21 @@ as TF32 is a compute type only, leaving all data in full precision FP32. FP16 pr
 
 We can run this experiment using AMP on Perlmutter by running one of the following commands:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
 ```
 for AMP with FP16 precision or
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
 ```
 for AMP with BF16 precision.
 
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
 ```
 or
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP FP16:
@@ -438,11 +438,11 @@ reuse. We can enabled the use of the fused optimizer in our training script by a
 
 We can run this experiment using the fused optimizer on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP, and the fused optimizer:
@@ -471,11 +471,11 @@ will compile/fuse eligible operations in the model, further reducing latency.
 
 We can run this experiment using JIT on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, AMP, fused optimizer and JIT:
@@ -513,11 +513,4 @@ PyTorch's new CUDA Graphs functionality to the existing model and training loop.
 much using CUDA Graphs, but for models with more CPU latency issues (e.g. from many small kernel launches), CUDA graphs are 
 something to consider to improve. Compare [train.py](train.py) and [train_graph.py](train_graph.py) to see
 how to use CUDA Graphs in PyTorch.
-
-### Full training with optimizations
-Now you can run the full model training on a single GPU with our optimizations. For convenience, we provide a configuration with the optimizations already enabled. Submit the full training with:
-
-```
-sbatch ???
-```
 
