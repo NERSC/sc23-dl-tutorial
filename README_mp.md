@@ -82,7 +82,8 @@ Scaffolding memory high watermark: 8.9056396484375 GB.
 ```
 
 We see that the memory has reduced to 32.7G. Also note that the throughput is higher.
-*Question: Can we drop the memory consumed more? What tensors have we left un-partitioned? *
+
+*Question: Can we drop the memory consumed more? What tensors have we left un-partitioned?*
 
 We also see that the bigger model gets a better RMSE compared to the batch size `64` run from before (with the smaller model):
 ![model parallel logs](tutorial_images/mp_comp.png)
