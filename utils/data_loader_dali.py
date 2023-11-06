@@ -40,7 +40,7 @@ class DaliDataLoader(object):
      
         with pipeline: # get input and target 
             # get input and target
-            inp, tar = fn.external_source(source = esh.HDF5ES(self.location,
+            inp, tar = fn.external_source(source = esh.ERA5ES(self.location,
                                                               self.train,
                                                               self.batch_size,
                                                               self.dt,
