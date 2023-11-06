@@ -229,7 +229,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
                 val_end = time.time()
                 if world_rank==0:
-                    logging.info(f'  Avg val loss={val_loss_avg}')
+                    logging.info(f'  Avg val loss={val_loss_avg.item()}')
                     logging.info(f'  Total validation time: {val_end - val_start} sec')
                     args.tboard_writer.add_scalar('Loss/valid', val_loss_avg, iters)
                     args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse_avg[0], iters)
