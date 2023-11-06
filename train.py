@@ -204,7 +204,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
         with torch.inference_mode():
             with torch.no_grad():
-                for i, data in tqdm(val_data_loader, desc="Validation progress", disable=(world_rank!=0)):
+                for i, data in enumerate(tqdm(val_data_loader, desc="Validation progress", disable=(world_rank!=0))):
 
                     # copy data to gpu
                     inp, tar = map(lambda x: x.to(device), data)
