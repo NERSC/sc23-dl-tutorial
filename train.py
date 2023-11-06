@@ -3,6 +3,7 @@ import os
 import time
 import numpy as np
 import argparse
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -126,7 +127,7 @@ def train(params, args, local_rank, world_rank, world_size):
 
         model.train()
         step_count = 0
-        for i, data in enumerate(train_data_loader, 0):
+        for i, data in enumerate(tqdm(train_data_loader, desc="Training progress  ", disable=(world_rank!=0))):
             if (args.enable_manual_profiling and world_rank==0):
                 if (epoch == 3 and i == 0):
                     torch.cuda.profiler.start()
@@ -203,11 +204,18 @@ def train(params, args, local_rank, world_rank, world_size):
 
         with torch.inference_mode():
             with torch.no_grad():
-                for i, data in enumerate(val_data_loader, 0):
+                for i, data in tqdm(val_data_loader, desc="Validation progress", disable=(world_rank!=0)):
+
+                    # copy data to gpu
+                    inp, tar = map(lambda x: x.to(device), data)
+
+                    # forward pass
                     with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
-                        inp, tar = map(lambda x: x.to(device), data)
                         gen = model(inp)
-                    val_loss += loss_func(gen, tar)
+                        loss = loss_func(gen, tar)
+
+                    # update metrics
+                    val_loss += loss
                     val_rmse += weighted_rmse(gen, tar)
                     val_samples += float(inp.shape[0])
                     valid_steps += 1
