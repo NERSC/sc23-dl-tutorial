@@ -1,4 +1,95 @@
-# sc23-tutorial
+# SC23 Deep Learning at Scale Tutorial
+
+This repository contains the example code material for the SC23 tutorial:
+*Deep Learning at Scale*.
+
+**Contents**
+* [Links](#links)
+* [Installation](#installation-and-setup)
+* [Model, data, and code overview](#model-data-and-training-code-overview)
+* [Single GPU training](#single-gpu-training)
+* [Single GPU performance](#single-gpu-performance-profiling-and-optimization)
+* [??](#distributed-gpu-training)
+* [Multi-GPU Model Parallelism](#model-parallelism)
+
+## Links
+
+Tutorial slides: https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=sharing
+
+Join the Slack workspace: https://join.slack.com/t/nersc-dl-tutorial/shared_invite/zt-25yvx25rr-RPWN1UclFvwgnRyr39Qt0w
+
+NERSC JupyterHub: https://jupyter.nersc.gov
+
+Data download (only needed if you want to run our examples elsewhere): https://portal.nersc.gov/project/dasrepo/pharring/sc23_data
+
+## Installation and Setup
+
+### Software environment
+
+The instructions in this README are intended to be used with NERSC's Perlmutter machine.
+
+Access to the Perlmutter machine is provided for this tutorial via [jupyter.nersc.gov](https://jupyter.nersc.gov). 
+Training account setup instructions will be given during the session. Once you have your provided account credentials, you can log in to Jupyter via the link (leave the OTP field blank when logging into Jupyter).
+Once logged into the hub, start a session by clicking the button for Perlmutter Shared CPU Node (other options will not work with this tutorial material). This will open up a session on a Perlmutter login node, from which you can submit jobs to the GPU nodes and monitor their progress.
+
+To begin, start a terminal from JupyterHub and clone this repository with:
+```bash
+git clone https://github.com/NERSC/sc23-dl-tutorial.git
+```
+You can use the Jupyter file browser to view and edit source files and scripts. For all of the example commands provided below, make sure you are running them from within the top-level folder of the repository. In your terminal, change to the directory with
+```bash
+cd sc23-dl-tutorial
+```
+
+For running slurm jobs on Perlmutter, we will use training accounts which are provided under the `ntrain4` project. The slurm script `submit_pm.sh` included in the repository is configured to work automatically as is, but if you submit your own custom jobs via `salloc` or `sbatch` you must include the following flags for slurm:
+* `-A ntrain4_g` is required for training accounts
+* `--reservation=<reservation_name>` is required to access the set of GPU nodes we have reserved for the duration of the tutorial. For the morning session use `<reservation_name>` set to `sc23_dl_tutorial_1`, and for the afternoon session use `<reservation_name>` set to `sc23_dl_tutorial_2` (we have two different size reservations for the single-GPU and multi-GPU sections respectively)
+
+The code can be run using the `nersc/pytorch:ngc-23.07-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA ngc 23.07 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-07.html), with a few additional packages added.
+
+### Installing Nsight Systems
+In this tutorial, we will be generating profile files using NVIDIA Nsight Systems on the remote systems. In order to open and view these
+files on your local computer, you will need to install the Nsight Systems program, which you can download [here](https://developer.nvidia.com/gameworksdownload#?search=nsight%20systems). Select the download option required for your system (e.g. Mac OS host for MacOS, Window Host for Windows, or Linux Host .rpm/.deb/.run for Linux). You may need to sign up and create a login to NVIDIA's developer program if you do not
+already have an account to access the download. Proceed to run and install the program using your selected installation method.
+
+## Model, data, and training code overview
+
+The model in this repository is adapted from modern applications of deep learning for weather forecasting, e.g. [FourCastNet](https://arxiv.org/abs/2202.11214). [GraphCast](https://arxiv.org/abs/2212.12794), [Pangu-Weather](https://arxiv.org/abs/2211.02556), and others. These models are trained on a combination of observed and simulated data describing the atmospheric state on Earth over the past several decades, and they achieve impressive performance in terms of accuracy and forecast speed when compared against traditional numerical weather prediction (NWP) models.
+
+![weather forecasting animation](tutorial_images/weather_forecasting.gif)
+
+For these examples we will be using a [vision transformer](https://arxiv.org/abs/2010.11929) (ViT) architecture, for which our implementation can be found in [`networks/vit.py`](networks/vit.py). ViTs are a widely-used architecture in computer vision, known for scaling well to large datasets and being able to model long-range dependencies easily via the use of self-attention layers. While 'vanilla' ViTs are not necessarily state-of-the-art on the weather forecasting task, they are a good model to use for educational purposes as they are widely used in a variety of applications and the techniques outlined here (e.g. channel-wise tensor parallelism) would transfer well to other applications (e.g. NLP/LLMs).
+
+![vision transformer schematic](tutorial_images/vit_schematic.png)
+
+Data-driven weather models are typically trained on the [ERA5 reanalysis dataset](https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5) from the European Center for Medium-range Weather Forecasts (ECMWF). This dataset represents 40 years of atmospheric data on a 25km global grid, combining simulation outputs assimilated with observations. The basic data loading pipeline for training models is defined in [`utils/data_loader.py`](utils/data_loader.py), whose primary components are:
+* The `ERA5Dataset`, which accesses the data stored on disk and serves input-output pairs of the atmospheric variables for training and validation. Each pair is a randomly-sampled snapshots of the atmosphere, separated by a 6 hour timestep. The model is given the first snapshot as input and is trained to predict the snapshot 6 hours later.
+* For this repository, we will be using a spatially-downsampled version of the data so training runs a little faster.
+* The above dataset object is passed to a PyTorch `DataLoader` which takes the samples and combines them into a batch for each training step.
+
+It is common practice to decay the learning rate according to some schedule as the model trains, so that the optimizer can settle into sharper minima during gradient descent. Here we opt for the cosine learning rate decay schedule, which starts at an intial learning rate and decays continuously throughout training according to a cosine function. This is handled by the `LambdaLR` or `CosineAnnealingLR` utilities from PyTorch, set in [`train.py`](train.py) -- the `LambdaLR` uses custom logic to implement learning rate warm-up if desired for distributed training.
+
+As we will see in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section, we'll be able to speed up the baseline data loading pipeline significantly by making various improvements. Another option introduced in that section is to do data loading using NVIDIA's DALI library, for which the implementation can be found in [`utils/data_loader_dali.py`](utils/data_loader_dali.py).
+
+The script to train the model is [`train.py`](train.py), which uses the following arguments to load the desired training setup:
+```
+--yaml_config YAML_CONFIG   path to yaml file containing training configs
+--config CONFIG             name of desired config in yaml file
+```
+
+Based on the selected configuration, the train script will then:
+1.  Set up the data loaders and construct our ViT model, the Adam optimizer, and our L2 loss function.
+2.  Loop over training epochs to run the training. See if you can identify the following key components: 
+    * Looping over data batches from our data loader.
+    * Applying the forward pass of the model and computing the loss function.
+    * Calling `backward()` on the loss value to backpropagate gradients. Note the use of the `grad_scaler` will be explained below when enabling mixed precision.
+    * Applying the model to the validation dataset and logging training and validation metrics to visualize in TensorBoard (see if you can find where we construct the TensorBoard `SummaryWriter` and where our specific metrics are logged via the `add_scalar` call).
+
+Besides the `train.py` script, we have a slightly more complex [`train_graph.py`](train_graph.py)
+script, which implements the same functionality with added capability for using the CUDA Graphs APIs introduced in PyTorch 1.10. This topic will be covered in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section.
+
+More info on the model and data can be found in the [slides](https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=drive_link). If you are experimenting with this repository after the tutorial date, you can download the data from here: https://portal.nersc.gov/project/dasrepo/pharring/sc23_data.
+Note that you will have to adjust the data path in `submit_pm.sh` to point yor personal copy after downloading.
 
 ## Single GPU training
 
@@ -6,7 +97,7 @@ First, let us look at the performance of the training script without optimizatio
 
 On Perlmutter for the tutorial, we will be submitting jobs to the batch queue. To submit this job, use the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4
+sbatch -n 1 ./submit_pm.sh --config=short
 ```
 `submit_pm.sh` is a batch submission script that defines resources to be requested by SLURM as well as the command to run.
 Note that any arguments for `train.py`, such as the desired config (`--config`), can be added after `submit_pm.sh` when submitting, and they will be passed to `train.py` properly.
@@ -15,15 +106,15 @@ directory. You can find the job id of your job using the command `squeue --me` a
 
 For interactive jobs, you can run the Python script directly using the following command (**NOTE: please don't run training on the Perlmutter login nodes**):
 ```
-python train.py --config=short --num_epochs 4
+python train.py --config=short
 ```
-This will run 4 epochs of training on a single GPU using a default batch size of 16.
+This will run 128 training iterations on a single GPU using a default batch size of 16.
 See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
-In the baseline configuration, the model converges to a loss of about `???` on
-the validation dataset in ??? epochs. This takes around ??? hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
+While the model predicts many atmospheric variables, we will focus on In the baseline configuration, the model converges to a RMSE of about `0.13` on
+the validation dataset in about 22k training iterations. This takes around 22 hours hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
 We want to compare our training results against the `base` config baseline, and TensorBoard makes this easy as long as all training runs are stored in the same place. 
 To copy the example TensorBoard log to the scratch directory where our training jobs will output their logs, do
 ```
@@ -69,11 +160,11 @@ We can also add calls to `torch.cuda.profiler.start()` and `torch.cuda.profiler.
 
 To generate a profile using our scripts on Perlmutter, run the following command: 
 ```
-ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 submit_pm.sh --config=short --num_epochs 4
+ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 submit_pm.sh --config=short
 ```
 If running interactively, this is the full command from the batch submission script:
 ```
-nsys profile -o baseline --trace=cuda,nvtx -c cudaProfilerApi --kill none -f true python train.py --config=short --num_epochs 4
+nsys profile -o baseline --trace=cuda,nvtx -c cudaProfilerApi --kill none -f true python train.py --config=short
 ```
 This command will run four epochs of the training script, profiling only the last epoch run. It will produce a file `baseline.nsys-rep` that can be opened in the Nsight System's program. The arg `--trace=cuda,nvtx` is optional and is used here to disable OS Runtime tracing for speed. The arg `-c cudaProfilerApi` instructs the profiler to only profile the duration of the runtime between the `torch.cuda.profiler.start()` and `torch.cuda.profiler.stop()` calls.
 
@@ -97,11 +188,11 @@ line arg to our script. The default used by PyTorch is `num_workers=0`, which ru
 
 We can run this experiment on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers <value of your choice>
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers <value of your choice>
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers <value of your choice>
+python train.py --config=short --num_data_workers <value of your choice>
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and 4 data workers:
@@ -193,11 +284,11 @@ argument `--data_loader_config=dali` to the training script.
 
 We can run this experiment on Perlmutter using DALI with 8 worker threads by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and DALI:
@@ -240,7 +331,7 @@ The `torch.cuda.amp.autocast` context manager handles converting model operation
 As a quick note, the A100 GPUs we've been using to report results thus far have been able to benefit from Tensor Core compute via the use of TF32 precision operations, enabled by default for CUDNN and CUBLAS in PyTorch. We can measure the benefit of TF32 precision usage on the A100 GPU by temporarily disabling it via setting the environment variable `NVIDIA_TF32_OVERRIDE=0`.  
 We can run this experiment on Perlmutter by running the following command:
 ```
-NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali
+NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 yields the following result for 4 epochs:
 ```
@@ -267,21 +358,21 @@ as TF32 is a compute type only, leaving all data in full precision FP32. FP16 pr
 
 We can run this experiment using AMP on Perlmutter by running one of the following commands:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
 ```
 for AMP with FP16 precision or
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
 ```
 for AMP with BF16 precision.
 
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
 ```
 or
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP FP16:
@@ -346,11 +437,11 @@ reuse. We can enabled the use of the fused optimizer in our training script by a
 
 We can run this experiment using the fused optimizer on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP, and the fused optimizer:
@@ -379,11 +470,11 @@ will compile/fuse eligible operations in the model, further reducing latency.
 
 We can run this experiment using JIT on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
+sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 If running interactively:
 ```
-python train.py --config=short --num_epochs 4 --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
+python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, AMP, fused optimizer and JIT:
@@ -422,10 +513,94 @@ much using CUDA Graphs, but for models with more CPU latency issues (e.g. from m
 something to consider to improve. Compare [train.py](train.py) and [train_graph.py](train_graph.py) to see
 how to use CUDA Graphs in PyTorch.
 
-### Full training with optimizations
-Now you can run the full model training on a single GPU with our optimizations. For convenience, we provide a configuration with the optimizations already enabled. Submit the full training with:
 
+## Model parallelism
+Now that we are familiar with distributed data parallel training, we are ready to move to more advanced parallelism in the form of model parallelism. One of the main motivations to explore this dimension is the need to use a larger model and/or process higher resolution images: both these can lead to higher accuracies and/or better emulation of physical phenomena. However, they will inflate the memory consumption (activation and weights) as well as computational cost.  At some point, the model (activation and weights) will no longer fit on a single GPU and we need to partition/shard the model across multiple GPUs. 
+We will increase our model size to motivate this partition and show you the building blocks of implementing model parallelism, motivated by the megatron-style model parallelism. We will focus on tensor parallelism here. Our goal is not to build the most efficient model parallel network (which can require significantly more care and development and would parallelize on other dimensions as well) but rather to serve as an instructive blueprint on how to get started on parallelizing your own model in PyTorch. For all the bells and whistles, see [Megatron-LM](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core) for deep details.
+
+### Setting up the communicator groups
+We assume a `MxD` grid of GPUs where we use data parallelism (as before) across D GPUs and split the model across `M` GPUs. Take a look at [`utils/comm.py`](utils/comm.py) where this is setup. The logic is more general where we could split the `M` GPUs into more orthogonal groups (example: `M = M_1 x M_2`) for parallelism on more dimensions. This is not done in this tutorial but we have left the logic in, so that the code can be extended for more levels of parallelism. 
+
+A quick example: Let's say we have 8 GPUs in total and we want to do 4-way model parallelism and 2-way data parallelism. The logic would simply have the model parallel group (each has 4 GPUs) ranks as `[0, 1, 2, 3], [4, 5, 6, 7]` and data parallel in the orthogonal dimension (each has 2 GPUs) as: `[0, 4], [1, 5], [2, 6], [3, 7]`. So, let's say, we are looking at the work rank `5` is doing -- then, all model parallel communications will happen within the group `[4, 5, 6, 7]` and data parallel gradient reduction in `[1, 5]`.  For this communication, we tell`torch.distributed` about the groups by creating them with `torch.distributed.new_group(ranks = grp)` and for any communication collectives such as `torch.distributed.all_reduce`, we simply pass the group to the [function call](https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_reduce). 
+
+Anothing thing to note is that we need to only use the data parallel groups for the data loading purposes -- this means that the data for each model parallel group (example: `[4, 5, 6, 7]` should be the same). This is taken care of in [`train_mp.py`](train_mp.py) with the lines:
 ```
-sbatch ???
+params.data_num_shards = comm.get_size("data")
+params.data_shard_id = comm.get_rank("data")
 ```
+`get_rank()` and `get_size()` are only within the data parallel group.
+
+### Setting up the model parallel utilities
+Now that we have our groups setup, we just have to tell PyTorch to additionally communicate local results within the groups. All tensor parallel distributed utilities are at [`distributed/`](distributed/). Start off with seeing how the distributed matrix multiply is implemented here [`distributed/layers.py`]. Note that there is a call to `reduce_from_parallel_region()` which does an `all_reduce` of the partial sums. Note that you will need to implement both the forward and backward functions for this new operation that will be used to evaluate and compute the gradient seamlessly. We can do this easily in PyTorch by adding our custom `autograd.Function` class in PyTorch.  This is implemented in [`distributed/mappings.py`](distributed/mappings.py). See the [PyTorch docs](https://pytorch.org/docs/stable/notes/extending.html#how-to-use) for the steps to do this. Check out the `copy_to_parallel_region()` function as well and see the forward and backward operations for them and how they align with what we saw in the slides. Note that we have also implemented other routines that are not used (such as gathers and scatters) but will be if you partition/shard on other dimensions. We leave it in so the code can be extended.
+
+### Running the model parallel code
+The train script is at [`train_mp.py`](train_mp.py). The model parallel size is defined by `row_parallel_size`. Setting this to `4`, for example, will enable 4-way model parallelism. Let's run a larger model by increasing our `embed_dim` to `1024` .  The config for this is called `mp` which trains the larger model assuming a global batch size of `64` with 4 GPUs for data parallelism (hence local batch size is `16`) . Let's use no model parallelism: so set `row_parallel_size=1` and run it on 4 GPUs with the following command:
+```
+sbatch --nodes 1 submit_pm_mp.sh --config=mp --row_parallel_size=1
+```
+ We can see from the logs that the job crashes with an OOM signal because the model is too big. 
+```
+File "/usr/local/lib/python3.10/dist-packages/torch/_tensor.py", line 491, in backward
+torch.autograd.backward(
+File "/usr/local/lib/python3.10/dist-packages/torch/autograd/__init__.py", line 204, in backward
+Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 318.00 MiB. GPU 1 has a total capacty of 39.39 GiB of which 130.56 MiB is free. Including non-PyTorch memory, this process has 39.25 GiB memory in use. Of the allocated memory 31.34 GiB is allocated by PyTorch, and 1.40 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting max_split_size_mb to avoid fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF
+```
+If we run it on an 80G GPU, we can see the estimated memory usage to be around 41GB and hence just overflows the 40G GPU. While this example is instructive, larger models (and/or larger inputs) can push the memory consumption significantly higher. 
+```
+Scaffolding memory high watermark: 10.2071533203125 GB.
+2023-11-03 04:14:58,115 - root - INFO - Starting Training Loop...
+2023-11-03 04:15:08,450 - torch.nn.parallel.distributed - INFO - Reducer buckets have been rebuilt in this iteration.
+2023-11-03 04:15:08,450 - torch.nn.parallel.distributed - INFO - Reducer buckets have been rebuilt in this iteration.
+2023-11-03 04:15:08,451 - torch.nn.parallel.distributed - INFO - Reducer buckets have been rebuilt in this iteration.
+2023-11-03 04:15:08,452 - torch.nn.parallel.distributed - INFO - Reducer buckets have been rebuilt in this iteration.
+2023-11-03 04:15:08,580 - root - INFO -  Memory usage after forward pass: 40.0841064453125 GB.
+2023-11-03 04:28:15,944 - root - INFO - Time taken for epoch 1 is 791.9564564228058 sec, avg 47.8410141021346 samples/sec
+2023-11-03 04:28:15,945 - root - INFO - Avg train loss=0.336905
+2023-11-03 04:28:35,199 - root - INFO - Avg val loss=0.265976
+2023-11-03 04:28:35,199 - root - INFO - Total validation time: 18.541259050369263 sec
+2023-11-03 04:28:36,641 - root - INFO -  Memory usage after forward pass: 41.20123291015625 GB.
+2023-11-03 04:41:45,640 - root - INFO - Time taken for epoch 2 is 790.3432559967041 sec, avg 48.0196417341964 samples/sec
+2023-11-03 04:41:45,642 - root - INFO - Avg train loss=0.224150
+2023-11-03 04:42:03,306 - root - INFO - Avg val loss=0.197870
+2023-11-03 04:42:03,307 - root - INFO - Total validation time: 17.101737022399902 sec
+2023-11-03 04:42:04,724 - root - INFO -  Memory usage after forward pass: 41.20123291015625 GB.
+2023-11-03 04:55:13,705 - root - INFO - Time taken for epoch 3 is 790.3928642272949 sec, avg 48.01662782862127 samples/sec
+2023-11-03 04:55:13,706 - root - INFO - Avg train loss=0.179888
+2023-11-03 04:55:29,698 - root - INFO - Avg val loss=0.169655
+2023-11-03 04:55:29,698 - root - INFO - Total validation time: 15.423459529876709 sec
+2023-11-03 04:55:31,077 - root - INFO -  Memory usage after forward pass: 41.20123291015625 GB.
+```
+
+Let's run it with `row_parallel_size=4`, which will partition/shard the hidden dimensions of the MLP weights and biases as well as the attention heads. Note here that 4 GPUs are used for model parallelism. Recall our global batch size is `64`. How many GPUs do we need? We also want 4-way data parallel, in addition to model parallelism, here: therefore, we should run on 16 GPUs (or 4 nodes on Perlmutter). Remember that we are assuming `M x D` GPUs always. Run this config with the command:
+```
+sbatch --nodes 4 submit_pm_mp.sh --config=mp --row_parallel_size=4
+```
+```
+Scaffolding memory high watermark: 8.9056396484375 GB.
+2023-11-04 04:55:27,609 - root - INFO - Starting Training Loop...
+2023-11-04 04:55:38,372 - root - INFO -  Memory usage after forward pass: 28.6165771484375 GB.
+2023-11-04 05:01:08,265 - root - INFO - Time taken for epoch 1 is 334.90422677993774 sec, avg 113.13085046518637 samples/sec
+2023-11-04 05:01:08,266 - root - INFO - Avg train loss=0.332298
+2023-11-04 05:01:21,165 - root - INFO - Avg val loss=0.246270
+2023-11-04 05:01:21,166 - root - INFO - Total validation time: 12.243930101394653 sec
+2023-11-04 05:01:21,829 - root - INFO -  Memory usage after forward pass: 32.7415771484375 GB.
+2023-11-04 05:06:52,733 - root - INFO - Time taken for epoch 2 is 331.56011605262756 sec, avg 114.46491348789367 samples/sec
+2023-11-04 05:06:52,734 - root - INFO - Avg train loss=0.205112
+2023-11-04 05:07:03,417 - root - INFO - Avg val loss=0.178545
+2023-11-04 05:07:03,417 - root - INFO - Total validation time: 10.102246046066284 sec
+2023-11-04 05:07:04,120 - root - INFO -  Memory usage after forward pass: 32.7415771484375 GB.
+2023-11-04 05:12:35,057 - root - INFO - Time taken for epoch 3 is 331.6335074901581 sec, avg 114.43958207729146 samples/sec
+2023-11-04 05:12:35,058 - root - INFO - Avg train loss=0.160458
+2023-11-04 05:12:46,143 - root - INFO - Avg val loss=0.148919
+2023-11-04 05:12:46,144 - root - INFO - Total validation time: 10.509092807769775 sec
+2023-11-04 05:12:46,776 - root - INFO -  Memory usage after forward pass: 32.7415771484375 GB.
+```
+
+We see that the memory has reduced to 32.7G. Also note that the throughput is higher.
+
+*Question: Can we drop the memory consumed more? What tensors have we left un-partitioned?*
+
+We also see that the bigger model gets a better RMSE compared to the batch size `64` run from before (with the smaller model):
+![model parallel logs](tutorial_images/mp_comp.png)
 

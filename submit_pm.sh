@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-node 4
 #SBATCH --time=01:00:00
-#SBATCH --image=nersc/pytorch:ngc-23.04-v0
+#SBATCH --image=nersc/pytorch:ngc-23.07-v0
 #SBATCH --module=gpu,nccl-2.18
 #SBATCH -J vit-era5
 #SBATCH -o %x-%j.out

@@ -5,7 +5,7 @@ import cupyx as cpx
 import h5py
 import logging
 
-class HDF5ES(object):
+class ERA5ES(object):
     # very important: the seed has to be constant across the workers, or otherwise mayhem:
     def __init__(self, location, 
                 train, batch_size, 

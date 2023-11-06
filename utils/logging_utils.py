@@ -3,8 +3,13 @@ import logging
 
 _format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
+def slurm_filter(record):
+  return int(os.environ['SLURM_PROCID']) == 0
+
 def config_logger(log_level=logging.INFO):
   logging.basicConfig(format=_format, level=log_level)
+  root_logger = logging.getLogger()
+  root_logger.addFilter(slurm_filter)
 
 def log_to_file(logger_name=None, log_level=logging.INFO, log_filename='tensorflow.log'):
 

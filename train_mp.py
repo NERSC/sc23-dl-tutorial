@@ -250,7 +250,7 @@ if __name__ == '__main__':
 
     # model parallelism arguments
     parser.add_argument("--row_parallel_size", default=1, type=int, help="Number of row comms")
-    parser.add_argument("--col_parallel_size", default=1, type=int, help="Number of col comms")
+    parser.add_argument("--col_parallel_size", default=1, type=int, help="Number of col comms") # not used here
 
     args = parser.parse_args()
  
@@ -285,6 +285,13 @@ if __name__ == '__main__':
     params.distributed = False
 
     # setup model parallel sizes
+    # we do not use col parallel size for this tutorial, but leave it in 
+    # so that an interested user can begin to extend
+    assert (
+        args.col_parallel_size == 1
+    ), f"col_parallel_size is not used in this example, please set to 1."
+
+
     params["model_parallel_sizes"] = [
         args.row_parallel_size,
         args.col_parallel_size
