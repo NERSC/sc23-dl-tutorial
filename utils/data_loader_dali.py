@@ -122,7 +122,7 @@ class DaliDataLoader(object):
             self.shard_id = 0
 
         # get img source data
-        extsource = esh.HDF5ES(self.location,
+        extsource = esh.ERA5ES(self.location,
                                self.train,
                                self.batch_size,
                                self.dt,
