@@ -218,7 +218,6 @@ def train(params, args, local_rank, world_rank, world_size):
                     val_loss += loss
                     val_rmse += weighted_rmse(gen, tar)
                     val_samples += float(inp.shape[0])
-                    valid_steps += 1
                 
                 if params.distributed:
                     torch.distributed.all_reduce(val_loss)
