@@ -11,6 +11,7 @@ from torch.cuda.amp import autocast, GradScaler
 import torch.multiprocessing
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
+from torch.distributed import ReduceOp
 
 import logging
 from utils import logging_utils
@@ -103,13 +104,13 @@ def train(params, args, local_rank, world_rank, world_size):
         val_loss = loss_func(gen, tar)
         val_rmse = weighted_rmse(gen, tar)
         if params.distributed:
-            torch.distributed.all_reduce(tr_loss)
-            torch.distributed.all_reduce(val_loss)
-            torch.distributed.all_reduce(val_rmse)
+            torch.distributed.all_reduce(tr_loss, op=ReduceOp.AVG)
+            torch.distributed.all_reduce(val_loss, op=ReduceOp.AVG)
+            torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG)
         if world_rank==0:
-            args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
-            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+            args.tboard_writer.add_scalar('Loss/train', tr_loss.item(), 0)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss.item(), 0)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], 0)
 
     iters = 0
     t1 = time.time()
@@ -164,8 +165,8 @@ def train(params, args, local_rank, world_rank, world_size):
                 if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # optimizer
 
             if params.distributed:
-                torch.distributed.all_reduce(loss)
-            tr_loss.append(loss.item()/world_size)
+                torch.distributed.all_reduce(loss, op=ReduceOp.AVG)
+            tr_loss.append(loss.item())
 
             if args.enable_manual_profiling: torch.cuda.nvtx.range_pop() # step
 
@@ -188,8 +189,10 @@ def train(params, args, local_rank, world_rank, world_size):
             logging.info('  Avg train loss=%f'%np.mean(tr_loss))
             args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
             args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
-            args.tboard_writer.add_scalar('Avg iters per sec', step_count/(end-start), iters)
-            fig = generate_images([inp, tar, gen])
+            args.tboard_writer.add_scalar('Avg iters per sec', step_count/float(end-start), iters)
+            fig = generate_images([inp.to(torch.float32),
+                                   tar.to(torch.float32),
+                                   gen.to(torch.float32)])
             args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
 
         val_start = time.time()
