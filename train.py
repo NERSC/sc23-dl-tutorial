@@ -191,15 +191,13 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
             args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
             args.tboard_writer.add_scalar('Avg iters per sec', step_count/float(end-start), iters)
-            fig = generate_images([inp.to(torch.float32),
-                                   tar.to(torch.float32),
-                                   gen.to(torch.float32)])
+            fig = generate_images([inp, tar, gen])
             args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
 
         val_start = time.time()
         val_loss = torch.zeros(1, device=device)
         val_rmse = torch.zeros((params.n_out_channels), dtype=torch.float32, device=device)
-        val_samples = torch.zeros(1, device=device)
+        val_steps = torch.zeros(1, device=device)
         model.eval()
 
         with torch.inference_mode():
@@ -217,15 +215,15 @@ def train(params, args, local_rank, world_rank, world_size):
                     # update metrics
                     val_loss += loss
                     val_rmse += weighted_rmse(gen, tar)
-                    val_samples += float(inp.shape[0])
+                    val_steps += float(inp.shape[0])
                 
                 if params.distributed:
                     torch.distributed.all_reduce(val_loss)
                     torch.distributed.all_reduce(val_rmse)
-                    torch.distributed.all_reduce(val_samples)
+                    torch.distributed.all_reduce(val_steps)
                     
-                val_rmse_avg = (val_rmse / val_samples)
-                val_loss_avg = (val_loss / val_samples)
+                val_rmse_avg = (val_rmse / val_steps)
+                val_loss_avg = (val_loss / val_steps)
 
                 val_end = time.time()
                 if world_rank==0:
