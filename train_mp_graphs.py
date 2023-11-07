@@ -253,30 +253,32 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
 
         val_start = time.time()
-        val_loss = []
+        val_loss = torch.zeros(1, device=device)
         val_rmse = torch.zeros((params.n_out_channels), dtype=torch.float32, device=device)
         valid_steps = 0
         model.eval()
 
-        with torch.no_grad():
-            for i, data in enumerate(val_data_loader, 0):
-                with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
-                    inp, tar = map(lambda x: x.to(device), data)
-                    gen = model(inp)
-                    loss = loss_func(gen, tar)
-                    val_rmse += weighted_rmse(gen, tar)
-                    if params.distributed:
-                        torch.distributed.all_reduce(loss, op=ReduceOp.AVG, group=comm.get_group("data"))
-                        torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
-                    val_loss.append(loss.item())
-                valid_steps += 1
+        with torch.inference_mode():
+            with torch.no_grad():
+                for i, data in enumerate(val_data_loader, 0):
+                    with autocast(enabled=params.amp_enabled, dtype=params.amp_dtype):
+                        inp, tar = map(lambda x: x.to(device), data)
+                        gen = model(inp)
+                        val_loss += loss_func(gen, tar)
+                        val_rmse += weighted_rmse(gen, tar)
+                    valid_steps += 1
+
+                if params.distributed:
+                    torch.distributed.all_reduce(val_loss, op=ReduceOp.AVG, group=comm.get_group("data"))
+                    torch.distributed.all_reduce(val_rmse, op=ReduceOp.AVG, group=comm.get_group("data"))
 
         val_rmse /= valid_steps # Avg validation rmse
+        val_loss /= valid_steps
         val_end = time.time()
         if world_rank==0:
-            logging.info('  Avg val loss=%f'%np.mean(val_loss))
+            logging.info('  Avg val loss={}'.format(val_loss.item()))
             logging.info('  Total validation time: {} sec'.format(val_end - val_start)) 
-            args.tboard_writer.add_scalar('Loss/valid', np.mean(val_loss), iters)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss, iters)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
             args.tboard_writer.flush()
 

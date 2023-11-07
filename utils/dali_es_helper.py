@@ -85,7 +85,10 @@ class ERA5ES(object):
         # check if we need to shuffle again
         if sample_info.epoch_idx != self.last_epoch:
             self.last_epoch = sample_info.epoch_idx
-            self.index_permutation = self.rng.permutation(self.n_samples_total)
+            if self.shuffle:
+                self.index_permutation = self.rng.permutation(self.n_samples_total)
+            else:
+                self.index_permutation = np.arange(self.n_samples_total)
             # shard the data
             start = self.n_samples_shard * self.shard_id
             end = start + self.n_samples_shard
