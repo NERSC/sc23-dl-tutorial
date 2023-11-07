@@ -30,7 +30,8 @@ The instructions in this README are intended to be used with NERSC's Perlmutter 
 
 Access to the Perlmutter machine is provided for this tutorial via [jupyter.nersc.gov](https://jupyter.nersc.gov). 
 Training account setup instructions will be given during the session. Once you have your provided account credentials, you can log in to Jupyter via the link (leave the OTP field blank when logging into Jupyter).
-Once logged into the hub, start a session by clicking the button for Perlmutter Shared CPU Node (other options will not work with this tutorial material). This will open up a session on a Perlmutter login node, from which you can submit jobs to the GPU nodes and monitor their progress.
+Once logged into the hub, start a session by clicking the button for Perlmutter Login Node (other options will not work with this tutorial material).
+This will open up a session on a Perlmutter login node, from which you can submit jobs to the GPU nodes and monitor their progress.
 
 To begin, start a terminal from JupyterHub and clone this repository with:
 ```bash
@@ -89,7 +90,7 @@ Besides the `train.py` script, we have a slightly more complex [`train_graph.py`
 script, which implements the same functionality with added capability for using the CUDA Graphs APIs introduced in PyTorch 1.10. This topic will be covered in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section.
 
 More info on the model and data can be found in the [slides](https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=drive_link). If you are experimenting with this repository after the tutorial date, you can download the data from here: https://portal.nersc.gov/project/dasrepo/pharring/sc23_data.
-Note that you will have to adjust the data path in `submit_pm.sh` to point yor personal copy after downloading.
+Note that you will have to adjust the data path in `submit_pm.sh` to point your personal copy after downloading.
 
 ## Single GPU training
 
