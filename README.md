@@ -113,7 +113,8 @@ See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
-While the model predicts many atmospheric variables, we will focus on In the baseline configuration, the model converges to a RMSE of about `0.13` on
+While the model predicts many atmospheric variables, we will focus on the prediction error of surface wind at 10m `u10` to represent model quality.
+In the baseline configuration, the model converges to a u10 RMSE of about `0.13` on
 the validation dataset in about 22k training iterations. This takes around 22 hours hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
 We want to compare our training results against the `base` config baseline, and TensorBoard makes this easy as long as all training runs are stored in the same place. 
 To copy the example TensorBoard log to the scratch directory where our training jobs will output their logs, do
