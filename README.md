@@ -9,7 +9,7 @@ This repository contains the example code material for the SC23 tutorial:
 * [Model, data, and code overview](#model-data-and-training-code-overview)
 * [Single GPU training](#single-gpu-training)
 * [Single GPU performance](#single-gpu-performance-profiling-and-optimization)
-* [??](#distributed-gpu-training)
+* [Distributed training with data parallelism](#distributed-training-with-data-parallelism)
 * [Multi-GPU Model Parallelism](#model-parallelism)
 
 ## Links
@@ -513,6 +513,32 @@ much using CUDA Graphs, but for models with more CPU latency issues (e.g. from m
 something to consider to improve. Compare [train.py](train.py) and [train_graph.py](train_graph.py) to see
 how to use CUDA Graphs in PyTorch.
 
+## Distributed training with data parallelism
+
+Instructions for hands-on with mulit-GPU and multi-node training using distributed data parallelism.
+
+Now that we have model training code that is optimized for training on a single GPU,
+we are ready to utilize multiple GPUs and multiple nodes to accelerate the workflow
+with *distributed training*. We will use the recommended `DistributedDataParallel`
+wrapper in PyTorch with the NCCL backend for optimized communication operations on
+systems with NVIDIA GPUs. Refer to the PyTorch documentation for additional details
+on the distributed package: https://pytorch.org/docs/stable/distributed.html
+
+### Code basics
+
+To submit a multi-GPU job, use ...
+
+Quiz questions.
+
+### Scaling and convergence
+
+Can we speed up training by scaling to multiple GPUs with data-parallelism?
+
+Describe the DP configs and give instructions to submit them.
+
+Analysis with tensorboard.
+
+Quiz questions.
 
 ## Model parallelism
 Now that we are familiar with distributed data parallel training, we are ready to move to more advanced parallelism in the form of model parallelism. One of the main motivations to explore this dimension is the need to use a larger model and/or process higher resolution images: both these can lead to higher accuracies and/or better emulation of physical phenomena. However, they will inflate the memory consumption (activation and weights) as well as computational cost.  At some point, the model (activation and weights) will no longer fit on a single GPU and we need to partition/shard the model across multiple GPUs. 
