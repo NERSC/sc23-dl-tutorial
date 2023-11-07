@@ -6,7 +6,7 @@
 #SBATCH --time=06:00:00
 #SBATCH --image=nersc/pytorch:ngc-23.07-v0
 #SBATCH --module=gpu,nccl-2.18
-#SBATCH -J vit-era5-mp
+#SBATCH -J vit-era5-mp-valpr
 #SBATCH -o %x-%j.out
 
 DATADIR=/pscratch/sd/s/shas1693/data/sc23_tutorial_data/downsampled
