@@ -537,9 +537,31 @@ Can we speed up training by scaling to multiple GPUs with data-parallelism?
 
 Describe the DP configs and give instructions to submit them.
 
+Submit single node, 4 GPUS, with global batch size 64:
+```
+sbatch -N 1 submit_pm.sh --config=bs64_opt
+```
+
+Submit 4 nodes, 16 GPUs, global batch size 256:
+```
+sbatch -N 4 submit_pm.sh --config=bs256_opt
+```
+
+Submit 16 nodes, 64 GPUs, global batch size 1024:
+```
+sbatch -N 16 submit_pm.sh --config=bs1024_opt
+```
+
 Analysis with tensorboard.
 
-Quiz questions.
+Quiz questions:
+
+- *As you scale up to more GPUs and larger batch sizes, what speedups do you observe in
+  the rate of samples processed? How about in the rate of convergence?*
+- *Which config is fastest? Which one is most cost efficient (in terms of total GPU time)?*
+- *Try to add a new config with a new batch size and/or an adjusted learning rate.
+  Try to predict the outcome. If you run it, do you see what you expect?
+  Can you invent a config which overfits, or one which diverges?*
 
 ## Model parallelism
 Now that we are familiar with distributed data parallel training, we are ready to move to more advanced parallelism in the form of model parallelism. One of the main motivations to explore this dimension is the need to use a larger model and/or process higher resolution images: both these can lead to higher accuracies and/or better emulation of physical phenomena. However, they will inflate the memory consumption (activation and weights) as well as computational cost.  At some point, the model (activation and weights) will no longer fit on a single GPU and we need to partition/shard the model across multiple GPUs. 
