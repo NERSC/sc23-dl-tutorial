@@ -95,7 +95,7 @@ First, let us look at the performance of the training script without optimizatio
 
 On Perlmutter for the tutorial, we will be submitting jobs to the batch queue. To submit this job, use the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short
 ```
 `submit_pm.sh` is a batch submission script that defines resources to be requested by SLURM as well as the command to run.
 Note that any arguments for `train.py`, such as the desired config (`--config`), can be added after `submit_pm.sh` when submitting, and they will be passed to `train.py` properly.
@@ -159,7 +159,7 @@ We can also add calls to `torch.cuda.profiler.start()` and `torch.cuda.profiler.
 
 To generate a profile using our scripts on Perlmutter, run the following command: 
 ```
-ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 submit_pm.sh --config=short
+ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 -t 20 submit_pm.sh --config=short
 ```
 If running interactively, this is the full command from the batch submission script:
 ```
@@ -187,7 +187,7 @@ line arg to our script. The default used by PyTorch is `num_workers=0`, which ru
 
 We can run this experiment on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers <value of your choice>
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers <value of your choice>
 ```
 If running interactively:
 ```
@@ -283,7 +283,7 @@ argument `--data_loader_config=dali` to the training script.
 
 We can run this experiment on Perlmutter using DALI with 8 worker threads by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 If running interactively:
 ```
@@ -330,7 +330,7 @@ The `torch.cuda.amp.autocast` context manager handles converting model operation
 As a quick note, the A100 GPUs we've been using to report results thus far have been able to benefit from Tensor Core compute via the use of TF32 precision operations, enabled by default for CUDNN and CUBLAS in PyTorch. We can measure the benefit of TF32 precision usage on the A100 GPU by temporarily disabling it via setting the environment variable `NVIDIA_TF32_OVERRIDE=0`.  
 We can run this experiment on Perlmutter by running the following command:
 ```
-NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
+NVIDIA_TF32_OVERRIDE=0 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 yields the following result for 4 epochs:
 ```
@@ -357,11 +357,11 @@ as TF32 is a compute type only, leaving all data in full precision FP32. FP16 pr
 
 We can run this experiment using AMP on Perlmutter by running one of the following commands:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
 ```
 for AMP with FP16 precision or
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
 ```
 for AMP with BF16 precision.
 
@@ -436,7 +436,7 @@ reuse. We can enabled the use of the fused optimizer in our training script by a
 
 We can run this experiment using the fused optimizer on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
 If running interactively:
 ```
@@ -469,7 +469,7 @@ will compile/fuse eligible operations in the model, further reducing latency.
 
 We can run this experiment using JIT on Perlmutter by running the following command:
 ```
-sbatch -n 1 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
+sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 If running interactively:
 ```
