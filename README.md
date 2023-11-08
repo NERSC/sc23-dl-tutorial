@@ -10,7 +10,7 @@ This repository contains the example code material for the SC23 tutorial:
 * [Single GPU training](#single-gpu-training)
 * [Single GPU performance](#single-gpu-performance-profiling-and-optimization)
 * [Distributed training with data parallelism](#distributed-training-with-data-parallelism)
-* [Multi-GPU Model Parallelism](#model-parallelism)
+* [Multi-GPU model parallelism](#model-parallelism)
 
 ## Links
 
@@ -46,7 +46,7 @@ For running slurm jobs on Perlmutter, we will use training accounts which are pr
 * `-A ntrain4_g` is required for training accounts
 * `--reservation=<reservation_name>` is required to access the set of GPU nodes we have reserved for the duration of the tutorial. For the morning session use `<reservation_name>` set to `sc23_dl_tutorial_1`, and for the afternoon session use `<reservation_name>` set to `sc23_dl_tutorial_2` (we have two different size reservations for the single-GPU and multi-GPU sections respectively)
 
-The code can be run using the `nersc/pytorch:ngc-23.07-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA ngc 23.07 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-07.html), with a few additional packages added.
+The code can be run using the `nersc/pytorch:ngc-23.07-v0` docker container. On Perlmutter, docker containers are run via [shifter](https://docs.nersc.gov/development/shifter/), and this container is already downloaded and automatically invoked by our job submission scripts. Our container is based on the [NVIDIA NGC 23.07 pytorch container](https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-07.html), with a few additional packages added.
 
 ### Installing Nsight Systems
 In this tutorial, we will be generating profile files using NVIDIA Nsight Systems on the remote systems. In order to open and view these
@@ -55,7 +55,7 @@ already have an account to access the download. Proceed to run and install the p
 
 ## Model, data, and training code overview
 
-The model in this repository is adapted from modern applications of deep learning for weather forecasting, e.g. [FourCastNet](https://arxiv.org/abs/2202.11214). [GraphCast](https://arxiv.org/abs/2212.12794), [Pangu-Weather](https://arxiv.org/abs/2211.02556), and others. These models are trained on a combination of observed and simulated data describing the atmospheric state on Earth over the past several decades, and they achieve impressive performance in terms of accuracy and forecast speed when compared against traditional numerical weather prediction (NWP) models.
+The model in this repository is adapted from modern applications of deep learning for weather forecasting, e.g. [FourCastNet](https://arxiv.org/abs/2202.11214), [GraphCast](https://arxiv.org/abs/2212.12794), [Pangu-Weather](https://arxiv.org/abs/2211.02556), and others. These models are trained on a combination of observed and simulated data describing the atmospheric state on Earth over the past several decades, and they achieve impressive performance in terms of accuracy and forecast speed when compared against traditional numerical weather prediction (NWP) models.
 
 ![weather forecasting animation](tutorial_images/weather_forecasting.gif)
 
@@ -86,9 +86,6 @@ Based on the selected configuration, the train script will then:
     * Calling `backward()` on the loss value to backpropagate gradients. Note the use of the `grad_scaler` will be explained below when enabling mixed precision.
     * Applying the model to the validation dataset and logging training and validation metrics to visualize in TensorBoard (see if you can find where we construct the TensorBoard `SummaryWriter` and where our specific metrics are logged via the `add_scalar` call).
 
-Besides the `train.py` script, we have a slightly more complex [`train_graph.py`](train_graph.py)
-script, which implements the same functionality with added capability for using the CUDA Graphs APIs introduced in PyTorch 1.10. This topic will be covered in the [Single GPU performance profiling and optimization](#Single-GPU-performance-profiling-and-optimization) section.
-
 More info on the model and data can be found in the [slides](https://drive.google.com/drive/folders/1wN1bCjHk2iocI6nowuzSugQopAwetCjR?usp=drive_link). If you are experimenting with this repository after the tutorial date, you can download the data from here: https://portal.nersc.gov/project/dasrepo/pharring/sc23_data.
 Note that you will have to adjust the data path in `submit_pm.sh` to point your personal copy after downloading.
 
@@ -114,7 +111,8 @@ See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
 and will push beyond to larger batch sizes in the distributed training section.
 
-While the model predicts many atmospheric variables, we will focus on In the baseline configuration, the model converges to a RMSE of about `0.13` on
+While the model predicts many atmospheric variables, we will focus on the prediction error of surface wind at 10m `u10` to represent model quality.
+In the baseline configuration, the model converges to a u10 RMSE of about `0.13` on
 the validation dataset in about 22k training iterations. This takes around 22 hours hours to run, so to save time we have already included an example TensorBoard log for the `base` config in the `example_logs` directory for you.
 We want to compare our training results against the `base` config baseline, and TensorBoard makes this easy as long as all training runs are stored in the same place. 
 To copy the example TensorBoard log to the scratch directory where our training jobs will output their logs, do
@@ -506,14 +504,6 @@ and zoomed in to a single iteration:
 
 As the compute cost of this model is mostly dominated by large GEMMs, latency reductions via optimizer and pointwise operation fusion are less impactful, but they still provide a small performance boost in this case.
 
-
-### Using CUDA Graphs (optional)
-In this repository, we've included an alternative training script [train_graph.py](train_graph.py) that illustrates applying
-PyTorch's new CUDA Graphs functionality to the existing model and training loop. Our tutorial model configuration does not benefit
-much using CUDA Graphs, but for models with more CPU latency issues (e.g. from many small kernel launches), CUDA graphs are 
-something to consider to improve. Compare [train.py](train.py) and [train_graph.py](train_graph.py) to see
-how to use CUDA Graphs in PyTorch.
-
 ## Distributed training with data parallelism
 
 Instructions for hands-on with mulit-GPU and multi-node training using distributed data parallelism.
@@ -685,3 +675,10 @@ We see that the memory has reduced to 32.7G. Also note that the throughput is hi
 We also see that the bigger model gets a better RMSE compared to the batch size `64` run from before (with the smaller model):
 ![model parallel logs](tutorial_images/mp_comp.png)
 
+### Using CUDA Graphs (optional)
+In this repository, we have included an alternative training script [train_mp_graphs.py](train_mp_graphs.py) that illustrates applying
+PyTorch's new CUDA Graphs functionality to the existing model and training loop. CUDA graphs are useful when trying to minimize
+the overhead from launching kernels on the CPU. They can be useful in large scale runs when we have
+orthogonal communicators (as here for model parallelism) to avoid jitter from the CPU as well as cases where CPU latency becomes an 
+important factor (e.g. models with many small kernel launches). Compare [train_mp.py](train_mp.py) and [train_mp_graphs.py](train_mp_graphs.py) to see
+how to use CUDA Graphs in PyTorch.

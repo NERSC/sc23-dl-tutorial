@@ -32,7 +32,7 @@ from utils.plots import generate_images
 
 
 def capture_model(params, model, loss_func, scaler, capture_stream, device, num_warmup=20):
-    print("Capturing Model")
+    logging.info("Capturing Model")
     inp_shape = (params.local_batch_size, params.n_in_channels, params.img_size[0], params.img_size[1])
     tar_shape = (params.local_batch_size, params.n_in_channels, params.img_size[0], params.img_size[1])
     
@@ -121,9 +121,9 @@ def train(params, args, local_rank, world_rank, world_size):
 
 
     if world_rank == 0:
-        print(model)
+        logging.info(model)
         all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
-        print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
+        logging.info(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
             
     if params.enable_fused:
         optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
