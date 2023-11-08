@@ -527,32 +527,65 @@ on the distributed package: https://pytorch.org/docs/stable/distributed.html
 
 ### Code basics
 
-To submit a multi-GPU job, use ...
+To submit multi-GPU and multi-node jobs, we use the same slurm script but specify either
+the number of tasks (GPUs) with `-n <number of tasks>` or `-N <number of nodes`, e.g.:
+```
+sbatch -N NUM\_NODES submit\_pm.sh [OPTIONS]
+```
 
-Quiz questions.
+This script automatically uses the slurm flags `--ntasks-per-node 4`, `--cpus-per-task 32`, `--gpus-per-node 4`, so slurm will allocate all the CPUs and GPUs available on each Perlmutter GPU node, and launch one process for each GPU in the job.
+
+*Question: why do you think we run 1 task (cpu process) per GPU, instead of 1 task per node (each running 4 GPUs)?*
+
+PyTorch `DistributedDataParallel`, or DDP for short, is flexible and can initialize process groups with a variety of methods. For this code, we will use the standard approach of initializing via environment variables, which can be easily read from the slurm environment. Take a look at the `export_DDP_vars.sh` helper script, which is used by our job script to expose for PyTorch DDP the global rank and node-local rank of each process, along with the total number of ranks and the address and port to use for network communication. In the [`train.py`](train.py) script, near the bottom in the main script execution, we set up the distributed backend using these environment variables via `torch.distributed.init_process_group`.
+
+When distributing a batch of samples in DDP training, we must make sure each rank gets a properly-sized subset of the full batch.
+*See if you can find where we use the `DistributedSampler` from PyTorch to properly partition the data in [`utils/data_loader.py`](utils/data_loader.py).*
+
+In `train.py`, after our U-Net model is constructed,
+we convert it to a distributed data parallel model by wrapping it as:
+```
+model = DistributedDataParallel(model, device_ids=[local_rank])
+```
+
+The DistributedDataParallel (DDP) model wrapper takes care of broadcasting
+initial model weights to all workers and performing all-reduce on the gradients
+in the training backward pass to properly synchronize and update the model
+weights in the distributed setting.
+
+*Question: why does DDP broadcast the initial model weights to all workers? What would happen if it didn't?*
 
 ### Scaling and convergence
 
-Can we speed up training by scaling to multiple GPUs with data-parallelism?
+To speed up training, we try to use larger batch sizes,
+spread across more GPUs, with larger learning rates.
+Our single-GPU base config from the previous section used a batch size of 16.
+So, we will try to keep the local batch size fixed at 16 and scale up the number of GPUs.
+In these experiments, we will make use the of the square-root learning rate scaling rule,
+which multiplies the base initial learning rate by `sqrt(global_batch_size/base_batch_size)`.
+However, the config files will let you set any learning rate you want.
+Feel free to experiment with different values and see what happens.
 
-Describe the DP configs and give instructions to submit them.
+*Question: how do you think the loss curves would change if we didn't increase the learning rate at all as we scale up?*
 
-Submit single node, 4 GPUS, with global batch size 64:
+*Question: what do you think would happen if we simply increased our learning rate without increasing batch size?*
+
+Let's first try running on 4 GPUs on a single node, with a global batch size of 64:
 ```
 sbatch -N 1 submit_pm.sh --config=bs64_opt
 ```
 
-Submit 4 nodes, 16 GPUs, global batch size 256:
+You can also go ahead and submit jobs that will use 4 nodes and 16 nodes, respectively:
 ```
+# Submit 4 nodes, 16 GPUs, global batch size 256
 sbatch -N 4 submit_pm.sh --config=bs256_opt
-```
-
-Submit 16 nodes, 64 GPUs, global batch size 1024:
-```
+# Submit 16 nodes, 64 GPUs, global batch size 1024
 sbatch -N 16 submit_pm.sh --config=bs1024_opt
 ```
 
-Analysis with tensorboard.
+Look at your new logs in Tensorboard. Compare the speed of training across runs,
+as well as the loss and RMSE metrics. You can toggle the horizontol axis to show relative time
+to view timing differences.
 
 Quiz questions:
 
