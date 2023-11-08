@@ -71,9 +71,9 @@ def train(params, args, local_rank, world_rank, world_size):
         optimizer = optim.Adam(model.parameters(), lr = params.lr, betas=(0.9, 0.95))
 
     if world_rank == 0:
-        print(model)
+        logging.info(model)
         all_mem_gb = pynvml.nvmlDeviceGetMemoryInfo(nvml_handle).used / (1024. * 1024. * 1024.)
-        print(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
+        logging.info(f"Scaffolding memory high watermark: {all_mem_gb} GB.")
 
     iters = 0
     startEpoch = 0
