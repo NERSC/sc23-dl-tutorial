@@ -169,12 +169,15 @@ def train(params, args, local_rank, world_rank, world_size):
         end = time.time()
 
         if world_rank==0:
-            logging.info('Time taken for epoch {} is {} sec, avg {} samples/sec'.format(epoch + 1, end - start,
-                                                                                        (step_count * params["global_batch_size"]) / (end - start)))
+            iters_per_sec = step_count / (end - start)
+            samples_per_sec = params["global_batch_size"] * iters_per_sec
+            logging.info('Time taken for epoch %i is %f sec, avg %f samples/sec',
+                         epoch + 1, end - start, samples_per_sec)
             logging.info('  Avg train loss=%f'%np.mean(tr_loss))
             args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
             args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
-            args.tboard_writer.add_scalar('Avg iters per sec', step_count/(end-start), iters)
+            args.tboard_writer.add_scalar('Avg iters per sec', iters_per_sec, iters)
+            args.tboard_writer.add_scalar('Avg samples per sec', samples_per_sec, iters)
             fig = generate_images([inp, tar, gen])
             args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
 
