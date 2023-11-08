@@ -530,7 +530,7 @@ on the distributed package: https://pytorch.org/docs/stable/distributed.html
 To submit multi-GPU and multi-node jobs, we use the same slurm script but specify either
 the number of tasks (GPUs) with `-n <number of tasks>` or `-N <number of nodes`, e.g.:
 ```
-sbatch -N NUM\_NODES submit\_pm.sh [OPTIONS]
+sbatch -N NUM_NODES submit_pm.sh [OPTIONS]
 ```
 
 This script automatically uses the slurm flags `--ntasks-per-node 4`, `--cpus-per-task 32`, `--gpus-per-node 4`, so slurm will allocate all the CPUs and GPUs available on each Perlmutter GPU node, and launch one process for each GPU in the job.
@@ -575,11 +575,10 @@ Let's first try running on 4 GPUs on a single node, with a global batch size of 
 sbatch -N 1 submit_pm.sh --config=bs64_opt
 ```
 
-You can also go ahead and submit jobs that will use 4 nodes and 16 nodes, respectively:
+You can also go ahead and submit jobs that will use 4 nodes and 16 nodes, with respective
+batch sizes of 256 and 1024:
 ```
-# Submit 4 nodes, 16 GPUs, global batch size 256
 sbatch -N 4 submit_pm.sh --config=bs256_opt
-# Submit 16 nodes, 64 GPUs, global batch size 1024
 sbatch -N 16 submit_pm.sh --config=bs1024_opt
 ```
 
