@@ -102,10 +102,6 @@ Note that any arguments for `train.py`, such as the desired config (`--config`),
 When using batch submission, you can see the job output by viewing the file `vit-era5-<jobid>.out` in the submission
 directory. You can find the job id of your job using the command `squeue --me` and looking at the first column of the output.
 
-For interactive jobs, you can run the Python script directly using the following command (**NOTE: please don't run training on the Perlmutter login nodes**):
-```
-python train.py --config=short
-```
 This will run 128 training iterations on a single GPU using a default batch size of 16.
 See [`config/ViT.yaml`](config/ViT.yaml) for specific configuration details.
 Note we will use the default batch size for the optimization work in the next section
@@ -161,10 +157,6 @@ To generate a profile using our scripts on Perlmutter, run the following command
 ```
 ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 -t 20 submit_pm.sh --config=short
 ```
-If running interactively, this is the full command from the batch submission script:
-```
-nsys profile -o baseline --trace=cuda,nvtx -c cudaProfilerApi --kill none -f true python train.py --config=short
-```
 This command will run four epochs of the training script, profiling only the last epoch run. It will produce a file `baseline.nsys-rep` that can be opened in the Nsight System's program. The arg `--trace=cuda,nvtx` is optional and is used here to disable OS Runtime tracing for speed. The arg `-c cudaProfilerApi` instructs the profiler to only profile the duration of the runtime between the `torch.cuda.profiler.start()` and `torch.cuda.profiler.stop()` calls.
 
 Loading this profile ([`baseline.nsys-rep`](sample_nsys_profiles/baseline.nsys-rep)) in Nsight Systems will look like this:
@@ -188,10 +180,6 @@ line arg to our script. The default used by PyTorch is `num_workers=0`, which ru
 We can run this experiment on Perlmutter by running the following command:
 ```
 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers <value of your choice>
-```
-If running interactively:
-```
-python train.py --config=short --num_data_workers <value of your choice>
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and 4 data workers:
@@ -285,10 +273,6 @@ We can run this experiment on Perlmutter using DALI with 8 worker threads by run
 ```
 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
-If running interactively:
-```
-python train.py --config=short --num_data_workers 8 --data_loader_config=dali
-```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and DALI:
 ```
@@ -365,15 +349,6 @@ sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_load
 ```
 for AMP with BF16 precision.
 
-If running interactively:
-```
-python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=fp16
-```
-or
-```
-python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16
-```
-
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP FP16:
 ```
 2023-09-26 22:42:50,782 - root - INFO - Time taken for epoch 1 is 13.934328317642212 sec, avg 35.59554423387713 samples/sec
@@ -438,10 +413,6 @@ We can run this experiment using the fused optimizer on Perlmutter by running th
 ```
 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
 ```
-If running interactively:
-```
-python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused
-```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, and AMP, and the fused optimizer:
 ```
@@ -470,10 +441,6 @@ will compile/fuse eligible operations in the model, further reducing latency.
 We can run this experiment using JIT on Perlmutter by running the following command:
 ```
 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
-```
-If running interactively:
-```
-python train.py --config=short --num_data_workers 8 --data_loader_config=dali --amp_mode=bf16 --enable_fused --enable_jit
 ```
 
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16, DALI, AMP, fused optimizer and JIT:
@@ -517,10 +484,14 @@ on the distributed package: https://pytorch.org/docs/stable/distributed.html
 
 ### Code basics
 
-To submit multi-GPU and multi-node jobs, we use the same slurm script but specify either
-the number of tasks (GPUs) with `-n <number of tasks>` or `-N <number of nodes`, e.g.:
+To submit multi-GPU and multi-node jobs, we can use the same slurm script but specify either
+the number of tasks (GPUs) with `-n <number of tasks>` or `-N <number of nodes`. However for 
+this session we will be using a different, larger compute reservation, so we have copied
+the original submission script to a new one `submit_dp.sh` which will use the larger reservation.
+
+To submit a multi-node, multi-GPU job, you could do, e.g.:
 ```
-sbatch -N NUM_NODES submit_pm.sh [OPTIONS]
+sbatch -N NUM_NODES submit_pm_dp.sh [OPTIONS]
 ```
 
 This script automatically uses the slurm flags `--ntasks-per-node 4`, `--cpus-per-task 32`, `--gpus-per-node 4`, so slurm will allocate all the CPUs and GPUs available on each Perlmutter GPU node, and launch one process for each GPU in the job.
@@ -562,14 +533,14 @@ Feel free to experiment with different values and see what happens.
 
 Let's first try running on 4 GPUs on a single node, with a global batch size of 64:
 ```
-sbatch -N 1 submit_pm.sh --config=bs64_opt
+sbatch -N 1 submit_pm_dp.sh --config=bs64_opt
 ```
 
 You can also go ahead and submit jobs that will use 4 nodes and 16 nodes, with respective
 batch sizes of 256 and 1024:
 ```
-sbatch -N 4 submit_pm.sh --config=bs256_opt
-sbatch -N 16 submit_pm.sh --config=bs1024_opt
+sbatch -N 4 submit_pm_dp.sh --config=bs256_opt
+sbatch -N 16 submit_pm_dp.sh --config=bs1024_opt
 ```
 
 Look at your new logs in Tensorboard. Compare the speed of training across runs,
