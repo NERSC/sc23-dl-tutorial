@@ -1,7 +1,6 @@
 #!/bin/bash 
 #SBATCH -C gpu 
 #SBATCH -q shared
-#SBATCH --ntasks-per-node 4
 #SBATCH --cpus-per-task 32
 #SBATCH --gpus-per-task 1
 #SBATCH --gpu-bind none
