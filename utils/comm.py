@@ -128,7 +128,7 @@ def init_process_group(info: str, store: str):
         master_address = os.getenv('MASTER_ADDR')
         if os.getenv('MASTER_ADDRESS') is not None:
             # Use MASTER_ADDRESS if available for backwards compatibility
-            master_address = int(os.getenv('MASTER_ADDRESS'))
+            master_address = os.getenv('MASTER_ADDRESS')
     elif info == "mpi":
         import socket
         from mpi4py import MPI
