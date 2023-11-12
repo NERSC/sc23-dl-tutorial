@@ -649,6 +649,9 @@ We see that the memory has reduced to 32.7G. Also note that the throughput is hi
 We also see that the bigger model gets a better RMSE compared to the batch size `64` run from before (with the smaller model):
 ![model parallel logs](tutorial_images/mp_comp.png)
 
+You can try out similar data parallel scaling configs for this model as well. Here's an example screenshot for three different global batch sizes:
+![model and data parallel](tutorial_images/mp_dp_comp.png)
+
 ### Using CUDA Graphs (optional)
 In this repository, we have included an alternative training script [train_mp_graphs.py](train_mp_graphs.py) that illustrates applying
 PyTorch's new CUDA Graphs functionality to the existing model and training loop. CUDA graphs are useful when trying to minimize

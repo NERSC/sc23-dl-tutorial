@@ -107,7 +107,7 @@ bs2048_opt:
   lr: 5.66e-3
 
 # Model parallel configs
-mp:
+mp: &mp
   <<: *base
   num_iters: 30000
   global_batch_size: 64
@@ -118,3 +118,18 @@ mp:
   amp_mode: fp16
   enable_jit: true
   enable_fused: true
+
+mp_bs16:
+  <<: *mp
+  global_batch_size: 16
+  lr: 5e-4
+
+mp_bs32:
+  <<: *mp
+  global_batch_size: 32
+  lr: 7.07e-4
+
+# larger seq length (use local bs = 1 here)
+mp_patch4:
+  <<: *mp
+  patch_size: 4
