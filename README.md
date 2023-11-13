@@ -568,7 +568,7 @@ We assume a `MxD` grid of GPUs where we use data parallelism (as before) across 
 
 A quick example: Let's say we have 8 GPUs in total and we want to do 4-way model parallelism and 2-way data parallelism. The logic would simply have the model parallel group (each has 4 GPUs) ranks as `[0, 1, 2, 3], [4, 5, 6, 7]` and data parallel in the orthogonal dimension (each has 2 GPUs) as: `[0, 4], [1, 5], [2, 6], [3, 7]`. So, let's say, we are looking at the work rank `5` is doing -- then, all model parallel communications will happen within the group `[4, 5, 6, 7]` and data parallel gradient reduction in `[1, 5]`.  For this communication, we tell`torch.distributed` about the groups by creating them with `torch.distributed.new_group(ranks = grp)` and for any communication collectives such as `torch.distributed.all_reduce`, we simply pass the group to the [function call](https://pytorch.org/docs/stable/distributed.html#torch.distributed.all_reduce). 
 
-Anothing thing to note is that we need to only use the data parallel groups for the data loading purposes -- this means that the data for each model parallel group (example: `[4, 5, 6, 7]` should be the same). This is taken care of in [`train_mp.py`](train_mp.py) with the lines:
+Another thing to note is that we need to only use the data parallel groups for the data loading purposes -- this means that the data for each model parallel group (e.g. `[4, 5, 6, 7]`) should be the same. This is taken care of in [`train_mp.py`](train_mp.py) with the lines:
 ```
 params.data_num_shards = comm.get_size("data")
 params.data_shard_id = comm.get_rank("data")
